@@ -11,6 +11,10 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#ifdef AMIX
+#include <sys/file.h>	/* FNDELAY: AMIX keeps the BSD flag names here */
+#include <poll.h>	/* poll() replaces select()/usleep(), see below */
+#endif
 #include <string.h>
 #include <ctype.h>
 #include <sys/wait.h>
@@ -320,16 +324,30 @@ char *Sys_ConsoleInput(void)
 {
     static char text[256];
     int     len;
+#ifdef AMIX
+	/* AMIX's libc.so.1 exports no select(); its static select() is itself a
+	   wrapper over poll().  Poll directly and skip the dead layer. */
+	struct pollfd pfd;
+#else
 	fd_set	fdset;
     struct timeval timeout;
+#endif
 
 	if (cls.state == ca_dedicated) {
+#ifdef AMIX
+		pfd.fd = 0;			/* stdin */
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		if (poll(&pfd, 1, 0) <= 0 || !(pfd.revents & POLLIN))
+			return NULL;
+#else
 		FD_ZERO(&fdset);
 		FD_SET(0, &fdset); // stdin
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 0;
 		if (select (1, &fdset, NULL, NULL, &timeout) == -1 || !FD_ISSET(0, &fdset))
 			return NULL;
+#endif
 
 		len = read (0, text, sizeof(text));
 		if (len < 1)
@@ -350,6 +368,20 @@ void Sys_LowFPPrecision (void)
 {
 }
 #endif
+
+/*
+================
+Sys_SendKeyEvents
+
+Pump the platform input device into the key queue.  id's svgalib port keeps
+this in vid_svgalib.c; on AMIX the keyboard is a plain tty, so it belongs to
+in_amix.c once that exists.  Empty here: with in_null.c there is no input,
+which is exactly what a dedicated server wants.
+================
+*/
+void Sys_SendKeyEvents (void)
+{
+}
 
 int main (int c, char **v)
 {
@@ -410,7 +442,11 @@ int main (int c, char **v)
         {   // play vcrfiles at max speed
             if (time < sys_ticrate.value && (vcrFile == -1 || recording) )
             {
+#ifdef AMIX
+				poll((struct pollfd *)0, 0, 1);	/* no usleep() in AMIX libc.so.1 */
+#else
 				usleep(1);
+#endif
                 continue;       // not time to run a server only tic yet
             }
             time = sys_ticrate.value;
@@ -441,7 +477,11 @@ void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length)
 
 	int r;
 	unsigned long addr;
+#ifdef AMIX
+	int psize = (int)sysconf(_SC_PAGESIZE);	/* getpagesize() is BSD-only here */
+#else
 	int psize = getpagesize();
+#endif
 
 	addr = (startaddr & ~(psize-1)) - psize;
 

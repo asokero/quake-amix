@@ -1,0 +1,142 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Port of **Quake** (id Software, GPL v2) to **AMIX** — Amiga UNIX, SVR4 on 68k.
+Target machine: Amiga 3000 with an accelerator (68040 Mercury / 68060), running
+the 68040/68060 AMIX kernel port from `~/kehitys/amix-playground/kernelsupport`.
+
+The point of the exercise is a benchmark: Quake is the heaviest game of its era,
+and a working port makes the kernel port's performance measurable on real
+silicon rather than argued about.
+
+Scope of the first version, in order:
+
+1. Console only — no X11.
+2. VA2000 RTG framebuffer, 320×200×8bpp. Other RTG drivers (xsvga, zz9000) later.
+3. No sound.
+4. Networking deferred (see `src/net_amix.c`).
+
+### Source base and provenance
+
+Seeded from `~/kehitys/amix-playground/amixquake`, the GCC/m68k-amigaos port of
+NovaCoder's AmiQuake (`github.com/terriblefire/amiquake`), **not** from pristine
+id source. That base carries portable 68k optimizations worth having: Quake III
+`InvSqrt` in `mathlib.c`, `fast_reciprocal` in `d_scan.c`, per-frame turbulence
+table caching in `r_misc.c`, squared-distance dynamic light culling in `r_main.c`.
+
+The AmigaOS backends were dropped. `src/sys_amix.c` and the `*_null.c` stubs are
+id's own Unix files, recovered from that repo's git history (commit `967fc47`
+deleted the non-Amiga platform files). Keep the amixquake clone around: its
+`git log` explains why parts of the renderer look the way they do.
+
+The first commit here is the pristine import, so every AMIX-specific change is
+visible as a diff against the AmigaOS port.
+
+GPL v2. Attribution and license headers stay.
+
+## Build
+
+Cross-compiled from Linux. Never build on AMIX itself — a full build there would
+take hours.
+
+```sh
+export PATH=$HOME/opt/amix-cross/bin:$PATH
+make                    # VIDEO=null, the default
+make VIDEO=va2000
+make clean
+make config
+```
+
+**Read `docs/TOOLCHAIN.md` before touching the build.** The toolchain needed
+fixes to compile floating-point code at all, one of which was silently
+miscompiling comparisons. In particular:
+
+- The sysroot needs `libm.a` and a hand-built `libamixcompat.a` that the
+  bootstrap does not install.
+- Link order is `-lm -lc -lamixcompat`, compat last, and `-lc` must be spelled
+  out or the wrapper drops it.
+- `-m68020` is deliberate: one binary for 030/040/060. `-m68040` cannot be
+  assembled by the current wrapper.
+
+## Reference material
+
+`docs/reference/` holds read-only copies, not built, not edited:
+
+| File | Why it is here |
+|---|---|
+| `vid_svgalib.c.orig` | id's console framebuffer backend. The structure `vid_va2000.c` should follow — `VID_Init`, `VID_Update`, `VID_SetPalette`, `D_BeginDirectRect`. |
+| `sys_linux.c.orig` | What `sys_amix.c` was before adaptation. |
+| `wolf3d_id_vl_amix.c.ref` | **The proven VA2000 recipe.** Register-level mode set, palette, framebuffer geometry, all verified on the real machine. |
+| `wolf3d_id_in_amix.c.ref` | **The proven termios keyboard**, including SVR4 signal traps that took real debugging. |
+
+The live wolf3d-amix port is at `~/kehitys/amix-playground/wolf3d-amix/master`;
+its `CLAUDE.md` carries AMIX platform constraints that apply here too.
+
+## VA2000 display
+
+`/dev/va2000`, character device major 68, driver in `~/kehitys/va2000-amix`.
+Facts established by the wolf3d port and not to be re-derived:
+
+- `mmap` 4 MB (`0x00400000`) of the board; framebuffer starts at offset `0x10000`.
+- 8bpp, stride = width in bytes; `fb[y*320 + x]` is a palette index.
+- Mode set is **direct 16-bit register writes**, not ioctls. The docs in
+  `va2000-amix` describe an ioctl interface that the working code does not use.
+- Palette is direct register writes too: R at `0x200 + idx*2`, G at `0x400 + …`,
+  B at `0x600 + …`.
+- 320×200 uses scale mode 5 (2× both axes) inside an 800×600 frame, and the
+  display reads 240 rows — clear all 240 or the bottom 40 show garbage.
+- On exit, restore Amiga passthrough (`0x38 = 0xf8`, `0x4e = 1`) or the machine
+  is left with no usable display.
+
+Zorro II gives roughly 3.5 MB/s, so a 64 KB frame costs ~20 ms in blit alone.
+Render into a malloc'd buffer and copy, as wolf3d does — do not rasterize
+directly into the board.
+
+## AMIX / SVR4 constraints
+
+These come from the va2000 and wolf3d ports and are hard limits.
+
+- **K&R C.** GCC 2.7.2.3, no C99. Declarations at block start. New AMIX files use
+  K&R definitions, **one parameter per declaration line** — grouped declarations
+  (`int a, b;`) misalign the 68k stack.
+- **`poll`, not `select`/`usleep`.** AMIX exports `poll` and `sysconf` from
+  `libc.so.1` but not the BSD calls. See `Sys_ConsoleInput` in `sys_amix.c`.
+- **`SA_RESTART` is a trap.** With a periodic SIGALRM, `select`/`poll` restart
+  with the original timeout and never return. wolf3d busy-waits on
+  `gettimeofday` instead; the reasoning is in `wolf3d_id_in_amix.c.ref`.
+- **Ignore SIGTTIN/SIGTTOU** before touching the tty — opening the RTG screen can
+  move the process out of the console's foreground process group.
+- Shell is Bourne sh: backticks, no `$(...)`, no `[[`, no arrays. `grep -q` does
+  not work.
+- Big-endian, as the m68k-amigaos port already assumed.
+
+## Optimizer
+
+`-O` globally. GCC 2.7.2.3's optimizer is not trustworthy on this code and the
+failures are not symmetric — wolf3d-amix found one file that **hangs** the
+compiler at `-O` (`wl_draw.c`) and another that is **miscompiled without** `-O`
+(`wl_main.c`). Expect to pin individual files. The Makefile has a commented
+per-file rule and `CFLAGS_NO` ready; when you use it, record which symptom
+earned it.
+
+## Current state
+
+Milestone 1 is the dedicated server: prove the engine — PAK loading, QuakeC VM,
+floating point, file I/O — before any display driver is a variable.
+
+- Builds and links: 72 C files, `build/quake`, ELF 32-bit MSB m68k 68020 SYSV.
+- Not yet run on hardware or emulator.
+- `vid_va2000.c` not written yet.
+
+Testing: Amiberry has no VA2000 emulation, so the emulator can only run the
+dedicated/null path — which is exactly milestone 1. `kernelsupport/emu-reset-boot.sh
+[040|060]` boots it, serial on TCP:1234, binaries in over tftp.
+**Guest state is wiped on every run**, and `pak0.pak` is 18–26 MB, so the game
+data has to live in the golden image or come over NFS — not tftp.
+
+Real hardware is `10.0.10.10` (root/`s0l0n`), file transfer via the NAS share
+`/mnt/nasu/` on AMIX, `/run/user/12044/gvfs/smb-share:server=nasu.local,share=public/`
+on Linux.

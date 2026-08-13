@@ -29,7 +29,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#ifdef __sun__
+/* AMIX is SVR4, like Solaris: FIONBIO/FIONREAD live in <sys/filio.h>,
+   not in <sys/ioctl.h>. */
+#if defined(__sun__) || defined(AMIX)
 #include <sys/filio.h>
 #endif
 
