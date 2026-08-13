@@ -1,0 +1,770 @@
+/*
+ * id_vl_amix.c - VA2000 display backend for Wolf3D on AMIX SVR4
+ *
+ * Opens /dev/va2000, mmaps the board, sets 320x200 8bpp mode
+ * using direct hardware register writes (va2000_restest.c approach).
+ * 320x200 uses scale=5 (2x both axes) -> physical 640x400 in 800x600 frame.
+ *
+ * Framebuffer layout (8bpp, 320 bytes/row):
+ *   fb = board_mmap + 0x10000
+ *   pixel (x,y) = fb[y * 320 + x]   (palette index 0-255)
+ *
+ * Palette: direct register writes at board+0x200 (R), +0x400 (G), +0x600 (B).
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/ioctl.h>
+
+#include "wl_def.h"
+
+/* ------------------------------------------------------------------
+ * Byte-swap helper — defined as a real function so GCC 2.7.2.3 -O
+ * does not attempt to inline/expand the bit-twiddling into ScaleShape
+ * loops (which causes the optimizer to hang indefinitely).
+ * ------------------------------------------------------------------ */
+uint16_t
+swap16le_fn(x)
+uint16_t x;
+{
+    return (uint16_t)(((x) & 0x00ffu) << 8 | ((x) & 0xff00u) >> 8);
+}
+
+/* ------------------------------------------------------------------
+ * VA2000 hardware register access (direct mmap writes, no ioctls)
+ * Register offsets verified against va2000_restest.c and va2000_test.c
+ * ------------------------------------------------------------------ */
+#define VA2000_BOARD_SIZE 0x00400000UL
+#define VA2000_FB_OFFSET  0x00010000UL
+#define VA2000_FB_STRIDE  320          /* bytes per row for 320-wide 8bpp */
+
+/* Write a 16-bit hardware register at byte offset OFF from mmap base */
+#define VA_WREG(off,val) \
+    (*((volatile unsigned short *)((char *)va_board + (off))) = (unsigned short)(val))
+
+/* ------------------------------------------------------------------
+ * Module state
+ * ------------------------------------------------------------------ */
+static int    va_fd    = -1;
+static char  *va_board = (char *)-1;  /* mmap base */
+
+static unsigned char *va_fb = (unsigned char *)0;  /* fb = board + 0x10000 */
+
+/* curpal: current logical palette (0-255 RGB entries) */
+SDL_Color curpal[256];
+
+/* ylookup[y] = byte offset of row y in the framebuffer */
+unsigned ylookup[MAXSCANLINES];
+
+/* Required by id_vl.h / wl_def.h */
+unsigned bufferofs  = 0;
+unsigned displayofs = 0;
+unsigned pelpan     = 0;
+unsigned curPitch   = VA2000_FB_STRIDE;
+boolean  screenfaded = 0;
+unsigned bordercolor = 0;
+
+/* Chunky render buffer (viewwidth * viewheight bytes, for 3D view) */
+uint8_t *chunkyBuffer = (uint8_t *)0;
+
+/* Raycaster lookup tables — allocated by VL_SetVGAPlaneMode */
+short *pixelangle = (short *)0;
+int   *wallheight = (int *)0;
+
+/* Off-screen palette buffers for fade operations */
+SDL_Color palette1[256];
+SDL_Color palette2[256];
+
+/* Wolf3D game palette (loaded from wolfpal.inc / sodpal.inc) */
+#define RGB(r,g,b) {(uint8_t)((r)*255/63),(uint8_t)((g)*255/63),(uint8_t)((b)*255/63)}
+SDL_Color gamepal[] = {
+#ifdef SPEAR
+#include "sodpal.inc"
+#else
+#include "wolfpal.inc"
+#endif
+};
+#undef RGB
+
+/* ------------------------------------------------------------------
+ * Internal helpers
+ * ------------------------------------------------------------------ */
+
+static void
+ylookup_init()
+{
+    int i;
+    for (i = 0; i < MAXSCANLINES; i++)
+        ylookup[i] = (unsigned)(i * VA2000_FB_STRIDE);
+}
+
+/*
+ * va_set_palette_entry: write one CLUT entry via SVGAIOCSetRGB.
+ * buf[0]=index, buf[1]=R, buf[2]=G, buf[3]=B  (0-255 each)
+ */
+static void
+va_set_palette_entry(idx, r, g, b)
+int idx;
+unsigned char r;
+unsigned char g;
+unsigned char b;
+{
+    /* Direct register writes: R at 0x200+idx*2, G at 0x400+idx*2, B at 0x600+idx*2 */
+    *((volatile unsigned short *)((char *)va_board + 0x200 + idx * 2)) = (unsigned short)r;
+    *((volatile unsigned short *)((char *)va_board + 0x400 + idx * 2)) = (unsigned short)g;
+    *((volatile unsigned short *)((char *)va_board + 0x600 + idx * 2)) = (unsigned short)b;
+}
+
+/* ------------------------------------------------------------------
+ * VL_ startup / shutdown
+ * ------------------------------------------------------------------ */
+
+void
+VL_SetVGAPlaneMode()
+{
+    int i;
+
+    va_fd = open("/dev/va2000", O_RDWR);
+    if (va_fd < 0) {
+        perror("VL_SetVGAPlaneMode: open /dev/va2000");
+        exit(1);
+    }
+
+    va_board = (char *)mmap(
+        (caddr_t)0,
+        (size_t)VA2000_BOARD_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        va_fd,
+        (off_t)0);
+
+    if (va_board == (char *)-1) {
+        perror("VL_SetVGAPlaneMode: mmap");
+        close(va_fd);
+        va_fd = -1;
+        exit(1);
+    }
+
+    va_fb = (unsigned char *)(va_board + VA2000_FB_OFFSET);
+
+    /*
+     * Set 320x200 8bpp with 2x scaling (scale=5) using direct register writes.
+     * Timings: 800x600@40MHz frame; scalemode=5 outputs 640x400 pixels.
+     * pitch = 320/2 = 160 (16-bit words per row in 8bpp mode).
+     * Register 0x16 = 0x0a required in 8bpp to avoid sync flicker.
+     * Source: va2000_restest.c "320x200 8bpp 2x" mode.
+     */
+    VA_WREG(0x16, 0x0a);    /* refresh timing: required for stable 8bpp sync */
+    VA_WREG(0x70, 840);     /* H sync start */
+    VA_WREG(0x72, 968);     /* H sync end */
+    VA_WREG(0x74, 1056);    /* H max */
+    VA_WREG(0x76, 601);     /* V sync start */
+    VA_WREG(0x78, 605);     /* V sync end */
+    VA_WREG(0x7a, 628);     /* V max */
+    VA_WREG(0x7c, 1);       /* pixel clock: CLK_40MHZ */
+    VA_WREG(0x0e, 0);       /* color mode: 8bpp (CM_8BIT=0) */
+    VA_WREG(0x58, 160);     /* pitch: 320px / 2 = 160 16-bit words */
+    VA_WREG(0x5c, 9);       /* pitch shift */
+    VA_WREG(0x06, 640);     /* display width: 320*2 (2x scale) */
+    VA_WREG(0x08, 480);     /* display height: 200*2=400, min frame=480 */
+    VA_WREG(0x04, 5);       /* scale mode: 2x both axes */
+    VA_WREG(0x14, 0x1e0);   /* safe x2 */
+    VA_WREG(0x18, 0x17);    /* RAM fetch */
+    VA_WREG(0x1a, 0x1e0);   /* fetch preroll */
+    VA_WREG(0x38, 0);       /* pan hi: RTG framebuffer */
+    VA_WREG(0x3a, 0);       /* pan lo */
+    VA_WREG(0x4e, 0);       /* capture: RTG mode on */
+    /* Repeat modeline to clear display glitches (from va2000_restest.c) */
+    VA_WREG(0x70, 840);
+    VA_WREG(0x72, 968);
+    VA_WREG(0x74, 1056);
+    VA_WREG(0x76, 601);
+    VA_WREG(0x78, 605);
+    VA_WREG(0x7a, 628);
+
+    /* Set initial palette */
+    memcpy((char *)curpal, (char *)gamepal, sizeof(SDL_Color) * 256);
+    for (i = 0; i < 256; i++)
+        va_set_palette_entry(i, curpal[i].r, curpal[i].g, curpal[i].b);
+
+    /* Clear 240 rows: 200 game rows + rows 200-239 that the 480-line display
+     * reads (480 physical lines / 2x scale = 240 framebuffer rows). */
+    memset((char *)va_fb, 0, (size_t)(VA2000_FB_STRIDE * 240));
+
+    ylookup_init();
+
+    /* Allocate chunky render buffer (max view width * height) */
+    if (!chunkyBuffer) {
+        chunkyBuffer = (uint8_t *)malloc(MAXVIEWWIDTH * 200);
+        if (!chunkyBuffer) {
+            puts("VL_SetVGAPlaneMode: out of memory for chunkyBuffer");
+            exit(1);
+        }
+        memset((char *)chunkyBuffer, 0, MAXVIEWWIDTH * 200);
+    }
+
+    /* Raycaster lookup tables */
+    if (!pixelangle) {
+        pixelangle = (short *)malloc(320 * sizeof(short));
+        if (!pixelangle) { puts("out of memory: pixelangle"); exit(1); }
+    }
+    if (!wallheight) {
+        wallheight = (int *)malloc(320 * sizeof(int));
+        if (!wallheight) { puts("out of memory: wallheight"); exit(1); }
+        memset((char *)wallheight, 0, 320 * sizeof(int));
+    }
+}
+
+void
+VL_Shutdown()
+{
+    if (chunkyBuffer) {
+        free((char *)chunkyBuffer);
+        chunkyBuffer = (uint8_t *)0;
+    }
+
+    if (va_board != (char *)-1) {
+        /* Restore native Amiga passthrough before releasing the mapping */
+        VA_WREG(0x38, 0xf8);  /* pan hi: passthrough */
+        VA_WREG(0x3a, 0x00);  /* pan lo */
+        VA_WREG(0x70, 840);   VA_WREG(0x72, 968);  VA_WREG(0x74, 1056);
+        VA_WREG(0x76, 601);   VA_WREG(0x78, 605);  VA_WREG(0x7a, 628);
+        VA_WREG(0x7c, 1);     /* CLK_40MHZ */
+        VA_WREG(0x0e, 1);     /* 16bpp */
+        VA_WREG(0x58, 320);   /* pitch 320 words */
+        VA_WREG(0x5c, 9);
+        VA_WREG(0x06, 640);
+        VA_WREG(0x08, 480);
+        VA_WREG(0x04, 0);     /* scale mode 0 */
+        VA_WREG(0x4e, 1);     /* passthrough */
+
+        munmap((caddr_t)va_board, (size_t)VA2000_BOARD_SIZE);
+        va_board = (char *)-1;
+        va_fb    = (unsigned char *)0;
+    }
+
+    if (va_fd >= 0) {
+        close(va_fd);
+        va_fd = -1;
+    }
+}
+
+void
+VL_SetTextMode()
+{
+    /* No text mode on VA2000; just clear screen */
+    if (va_fb)
+        memset((char *)va_fb, 0, (size_t)(VA2000_FB_STRIDE * 200));
+}
+
+/* ------------------------------------------------------------------
+ * Double-buffer stubs (single-buffered for now)
+ * ------------------------------------------------------------------ */
+
+void
+VL_WaitVBL(vbls)
+int vbls;
+{
+    SDL_Delay((unsigned long)vbls * 14);  /* ~70Hz */
+}
+
+void
+VL_DrawChunkyBuffer()
+{
+    /* Copy chunkyBuffer (viewwidth x viewheight) into framebuffer. */
+    extern int viewscreenx, viewscreeny, viewwidth, viewheight;
+    int row;
+    unsigned char *src;
+    unsigned char *dst;
+
+    if (!va_fb || !chunkyBuffer)
+        return;
+
+    src = chunkyBuffer;
+    dst = va_fb + (unsigned)(viewscreeny * VA2000_FB_STRIDE + viewscreenx);
+
+    for (row = 0; row < viewheight; row++) {
+        memcpy((char *)dst, (char *)src, (size_t)viewwidth);
+        src += viewwidth;
+        dst += VA2000_FB_STRIDE;
+    }
+}
+
+void
+VL_ReAllocChunkyBuffer()
+{
+    extern int viewwidth, viewheight;
+
+    if (chunkyBuffer)
+        free((char *)chunkyBuffer);
+    chunkyBuffer = (uint8_t *)malloc((size_t)(viewwidth * viewheight));
+    if (!chunkyBuffer) {
+        puts("VL_ReAllocChunkyBuffer: out of memory");
+        exit(1);
+    }
+    memset((char *)chunkyBuffer, 0, (size_t)(viewwidth * viewheight));
+}
+
+void
+VL_ChangeScreenBuffer()
+{
+    /* Single buffer: no-op */
+}
+
+/* ------------------------------------------------------------------
+ * Palette operations
+ * ------------------------------------------------------------------ */
+
+void
+VL_ConvertPalette(srcpal, destpal, numColors)
+byte       *srcpal;
+SDL_Color  *destpal;
+int         numColors;
+{
+    int i;
+    for (i = 0; i < numColors; i++) {
+        destpal[i].r = (uint8_t)(*srcpal++ * 255 / 63);
+        destpal[i].g = (uint8_t)(*srcpal++ * 255 / 63);
+        destpal[i].b = (uint8_t)(*srcpal++ * 255 / 63);
+    }
+}
+
+void
+VL_SetPalette(palette, forceupdate)
+SDL_Color *palette;
+boolean    forceupdate;
+{
+    int i;
+
+    if (palette)
+        memcpy((char *)curpal, (char *)palette, sizeof(SDL_Color) * 256);
+
+    if (va_fd < 0)
+        return;
+
+    for (i = 0; i < 256; i++)
+        va_set_palette_entry(i, curpal[i].r, curpal[i].g, curpal[i].b);
+}
+
+void
+VL_GetPalette(palette)
+SDL_Color *palette;
+{
+    memcpy((char *)palette, (char *)curpal, sizeof(SDL_Color) * 256);
+}
+
+void
+VL_FillPalette(red, green, blue)
+int red;
+int green;
+int blue;
+{
+    int i;
+    for (i = 0; i < 256; i++) {
+        curpal[i].r = (uint8_t)red;
+        curpal[i].g = (uint8_t)green;
+        curpal[i].b = (uint8_t)blue;
+    }
+    VL_SetPalette((SDL_Color *)0, 1);
+}
+
+void
+VL_GetColor(color, red, green, blue)
+int  color;
+int *red;
+int *green;
+int *blue;
+{
+    *red   = (int)curpal[color].r;
+    *green = (int)curpal[color].g;
+    *blue  = (int)curpal[color].b;
+}
+
+/* Unused stub - colour 0 EHB only on Amiga */
+uint8_t VL_RemapColorEHB(color) uint8_t color; { return color; }
+void    VL_RemapBufferEHB(s,d,n) uint8_t *s; uint8_t *d; int n;
+        { memcpy((char *)d, (char *)s, (size_t)n); }
+boolean VL_RemapBufferCustomEHB(s,n,pal) uint8_t *s; int n; SDL_Color *pal;
+        { return 0; }
+
+void
+VL_FadeOut(start, end, red, green, blue, steps)
+int start;
+int end;
+int red;
+int green;
+int blue;
+int steps;
+{
+    int i, j, orig, delta;
+    SDL_Color *op, *np;
+
+    red   = red   * 255 / 63;
+    green = green * 255 / 63;
+    blue  = blue  * 255 / 63;
+
+    VL_WaitVBL(1);
+    VL_GetPalette(palette1);
+    memcpy((char *)palette2, (char *)palette1, sizeof(SDL_Color) * 256);
+
+    for (i = 0; i < steps; i++) {
+        op = &palette1[start];
+        np = &palette2[start];
+        for (j = start; j <= end; j++) {
+            orig = (int)op->r; delta = red   - orig;
+            np->r = (uint8_t)(orig + delta * i / steps);
+            orig = (int)op->g; delta = green - orig;
+            np->g = (uint8_t)(orig + delta * i / steps);
+            orig = (int)op->b; delta = blue  - orig;
+            np->b = (uint8_t)(orig + delta * i / steps);
+            op++; np++;
+        }
+        VL_WaitVBL(1);
+        VL_SetPalette(palette2, 1);
+    }
+
+    VL_FillPalette(red, green, blue);
+    screenfaded = 1;
+}
+
+void
+VL_FadeIn(start, end, palette, steps)
+int        start;
+int        end;
+SDL_Color *palette;
+int        steps;
+{
+    int i, j, delta;
+
+    VL_WaitVBL(1);
+    VL_GetPalette(palette1);
+    memcpy((char *)palette2, (char *)palette1, sizeof(SDL_Color) * 256);
+
+    for (i = 0; i < steps; i++) {
+        for (j = start; j <= end; j++) {
+            delta = (int)palette[j].r - (int)palette1[j].r;
+            palette2[j].r = (uint8_t)((int)palette1[j].r + delta * i / steps);
+            delta = (int)palette[j].g - (int)palette1[j].g;
+            palette2[j].g = (uint8_t)((int)palette1[j].g + delta * i / steps);
+            delta = (int)palette[j].b - (int)palette1[j].b;
+            palette2[j].b = (uint8_t)((int)palette1[j].b + delta * i / steps);
+        }
+        VL_WaitVBL(1);
+        VL_SetPalette(palette2, 1);
+    }
+
+    VL_SetPalette(palette, 1);
+    screenfaded = 0;
+}
+
+/* ------------------------------------------------------------------
+ * Direct framebuffer pixel operations
+ * ------------------------------------------------------------------ */
+
+void
+VL_Plot(x, y, color)
+int x;
+int y;
+int color;
+{
+    if (!va_fb) return;
+    va_fb[y * VA2000_FB_STRIDE + x] = (unsigned char)color;
+}
+
+byte
+VL_GetPixel(x, y)
+int x;
+int y;
+{
+    if (!va_fb) return 0;
+    return (byte)va_fb[y * VA2000_FB_STRIDE + x];
+}
+
+void
+VL_Hlin(x, y, width, color)
+unsigned x;
+unsigned y;
+unsigned width;
+int      color;
+{
+    if (!va_fb) return;
+    memset((char *)(va_fb + y * VA2000_FB_STRIDE + x),
+           color, (size_t)width);
+}
+
+void
+VL_Vlin(x, y, height, color)
+int x;
+int y;
+int height;
+int color;
+{
+    unsigned char *p;
+    int h;
+
+    if (!va_fb) return;
+    p = va_fb + y * VA2000_FB_STRIDE + x;
+    for (h = 0; h < height; h++) {
+        *p = (unsigned char)color;
+        p += VA2000_FB_STRIDE;
+    }
+}
+
+void
+VL_Bar(x, y, width, height, color)
+int x;
+int y;
+int width;
+int height;
+int color;
+{
+    unsigned char *p;
+    int h;
+
+    if (!va_fb) return;
+    p = va_fb + y * VA2000_FB_STRIDE + x;
+    for (h = 0; h < height; h++) {
+        memset((char *)p, color, (size_t)width);
+        p += VA2000_FB_STRIDE;
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Blit operations: chunky pixel data to/from framebuffer
+ * ------------------------------------------------------------------ */
+
+/*
+ * VL_MemToScreen: draw a VGA-planar-encoded picture to the framebuffer.
+ *
+ * source is in VGA plane layout (width/4 bytes per plane * height * 4 planes).
+ * Converts to chunky inline, same as Wolf4SDL SDL path.
+ */
+void
+VL_MemToScreen(source, width, height, x, y)
+byte *source;
+int   width;
+int   height;
+int   x;
+int   y;
+{
+    int   ys, xs;
+    byte *dst;
+
+    if (!va_fb) return;
+
+    for (ys = 0; ys < height; ys++) {
+        dst = va_fb + (y + ys) * VA2000_FB_STRIDE + x;
+        for (xs = 0; xs < width; xs++) {
+            dst[xs] = source[(ys * (width >> 2) + (xs >> 2))
+                             + (xs & 3) * (width >> 2) * height];
+        }
+    }
+}
+
+void
+VL_ScreenToMem(dest, width, height, x, y)
+byte *dest;
+int   width;
+int   height;
+int   x;
+int   y;
+{
+    int   row;
+    unsigned char *src;
+
+    if (!va_fb) return;
+    src = va_fb + y * VA2000_FB_STRIDE + x;
+    for (row = 0; row < height; row++) {
+        memcpy((char *)dest, (char *)src, (size_t)width);
+        dest += width;
+        src  += VA2000_FB_STRIDE;
+    }
+}
+
+/* ------------------------------------------------------------------
+ * Latch (off-screen surface) operations
+ * ------------------------------------------------------------------ */
+
+SDL_Surface *
+VL_CreateSurface(width, height)
+int width;
+int height;
+{
+    SDL_Surface *s;
+    s = (SDL_Surface *)malloc(sizeof(SDL_Surface));
+    if (!s) return (SDL_Surface *)0;
+    s->w     = width;
+    s->h     = height;
+    s->pitch = width;
+    s->pixels = (uint8_t *)malloc((size_t)(width * height));
+    if (!s->pixels) {
+        free((char *)s);
+        return (SDL_Surface *)0;
+    }
+    memset((char *)s->pixels, 0, (size_t)(width * height));
+    return s;
+}
+
+/*
+ * VL_MemToLatch: decode VGA-planar chunk into an off-screen surface.
+ * Same plane-deinterleave as VL_MemToScreen.
+ */
+void
+VL_MemToLatch(source, width, height, destSurface, x, y)
+byte        *source;
+int          width;
+int          height;
+SDL_Surface *destSurface;
+int          x;
+int          y;
+{
+    int   ys, xs;
+    byte *dst;
+
+    if (!destSurface || !destSurface->pixels) return;
+
+    for (ys = 0; ys < height; ys++) {
+        dst = destSurface->pixels + (y + ys) * destSurface->pitch + x;
+        for (xs = 0; xs < width; xs++) {
+            dst[xs] = source[(ys * (width >> 2) + (xs >> 2))
+                             + (xs & 3) * (width >> 2) * height];
+        }
+    }
+}
+
+void
+VL_LatchToScreen(source, xsrc, ysrc, width, height, xdest, ydest)
+SDL_Surface *source;
+int          xsrc;
+int          ysrc;
+int          width;
+int          height;
+int          xdest;
+int          ydest;
+{
+    int            row;
+    unsigned char *src;
+    unsigned char *dst;
+
+    if (!va_fb || !source || !source->pixels) return;
+
+    src = source->pixels + ysrc * source->pitch + xsrc;
+    dst = va_fb + ydest * VA2000_FB_STRIDE + xdest;
+
+    for (row = 0; row < height; row++) {
+        memcpy((char *)dst, (char *)src, (size_t)width);
+        src += source->pitch;
+        dst += VA2000_FB_STRIDE;
+    }
+}
+
+void
+VL_ScreenToScreen(src, dst)
+SDL_Surface *src;
+SDL_Surface *dst;
+{
+    int size;
+    if (!src || !dst || !src->pixels || !dst->pixels) return;
+    size = src->w * src->h;
+    if (size > dst->w * dst->h)
+        size = dst->w * dst->h;
+    memcpy((char *)dst->pixels, (char *)src->pixels, (size_t)size);
+    dst->w     = src->w;
+    dst->h     = src->h;
+    dst->pitch = src->pitch;
+}
+
+/* ------------------------------------------------------------------
+ * VL_DrawPicBare: draw raw chunky pixels directly to framebuffer
+ * ------------------------------------------------------------------ */
+
+void
+VL_DrawPicBare(x, y, pic, width, height)
+int   x;
+int   y;
+byte *pic;
+int   width;
+int   height;
+{
+    int            row;
+    unsigned char *dst;
+
+    if (!va_fb) return;
+    dst = va_fb + y * VA2000_FB_STRIDE + x;
+    for (row = 0; row < height; row++) {
+        memcpy((char *)dst, (char *)pic, (size_t)width);
+        pic += width;
+        dst += VA2000_FB_STRIDE;
+    }
+}
+
+/* ------------------------------------------------------------------
+ * VL_MungePic: reorder VGA planar -> chunky (in-place)
+ * Copied from id_vh.c (platform-neutral).
+ * ------------------------------------------------------------------ */
+
+void
+VL_MungePic(source, width, height)
+byte    *source;
+unsigned width;
+unsigned height;
+{
+    unsigned  x, y, plane, size, pwidth;
+    byte     *temp, *dest, *srcline;
+
+    size = width * height;
+    if (width & 3) {
+        puts("VL_MungePic: width not divisible by 4");
+        return;
+    }
+
+    temp = (byte *)malloc((size_t)size);
+    if (!temp) return;
+    memcpy((char *)temp, (char *)source, (size_t)size);
+
+    dest   = source;
+    pwidth = width / 4;
+
+    for (plane = 0; plane < 4; plane++) {
+        srcline = temp;
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < pwidth; x++)
+                *dest++ = *(srcline + x * 4 + plane);
+            srcline += width;
+        }
+    }
+    free((char *)temp);
+}
+
+int
+SDL_SaveBMP(surface, file)
+SDL_Surface *surface;
+const char  *file;
+{
+    return 0;
+}
+
+/* ------------------------------------------------------------------
+ * Scaled draw stubs — scaleFactor=1 on AMIX so these are trivial
+ * ------------------------------------------------------------------ */
+
+void
+VL_MemToScreenScaledCoord(source, width, height, srcx, srcy, destx, desty)
+byte *source;
+int width, height, srcx, srcy, destx, desty;
+{
+    VL_MemToScreen(source, width, height, destx, desty);
+}
+
+/*
+ * VL_BarScaledCoord   = macro VL_Bar           (id_vl.h)
+ * VWB_BarScaledCoord  = macro VL_BarScaledCoord (id_vh.h)
+ * VWB_DrawPicScaledCoord = macro VWB_DrawPic    (id_vh.h)
+ * LatchDrawPicScaledCoord = macro LatchDrawPic  (id_vh.h)
+ * All resolved at compile time — only VL_MemToScreenScaledCoord needs a body.
+ */

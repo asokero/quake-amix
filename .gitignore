@@ -1,0 +1,12 @@
+# Build artifacts
+obj/
+build/
+*.o
+*.a
+
+# Quake game data (not distributable)
+id1/
+*.pak
+
+# Local config
+config.local.sh

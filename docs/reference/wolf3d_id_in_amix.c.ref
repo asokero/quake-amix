@@ -1,0 +1,358 @@
+/*
+ * id_in_amix.c - Keyboard input for Wolf3D on AMIX SVR4
+ *
+ * Uses POSIX termios raw mode on stdin.
+ * Arrow keys send ANSI escape sequences (ESC [ A/B/C/D).
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <signal.h>
+#include <termios.h>
+#include <sys/types.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include "wl_def.h"
+
+#define AMX_ESC       0x1b
+#define AMX_RETURN    0x0d
+#define AMX_SPACE     0x20
+#define AMX_BACKSPACE 0x7f
+#define AMX_TAB       0x09
+#define AMX_CTRL_C    0x03
+
+volatile boolean Keyboard[256];
+boolean          MousePresent    = 0;
+volatile boolean Paused          = 0;
+volatile char    LastASCII       = 0;
+volatile ScanCode LastScan       = 0;
+int              JoyNumButtons   = 0;
+boolean          forcegrabmouse  = 0;
+
+static struct termios saved_tty;
+static int tty_saved = 0;
+static int quit_requested = 0;
+
+static KeyboardDef KbdDefs = {
+    sc_Control, sc_Space,
+    0, sc_UpArrow, 0, sc_LeftArrow, sc_RightArrow, 0, sc_DownArrow, 0
+};
+
+static void
+sigint_handler(sig)
+int sig;
+{
+    quit_requested = 1;
+    Keyboard[sc_Escape] = 1;
+    LastScan  = sc_Escape;
+    LastASCII = 0;
+}
+
+void
+IN_Startup()
+{
+    struct termios raw;
+
+    /* Ignore SIGTTIN/SIGTTOU: scrmenu may steal the console foreground
+     * process group when the VA2000 screen opens, turning wolf3d into a
+     * background process.  Without this, tcsetattr/read on the console
+     * tty would stop us.  With it they return EIO instead. */
+    signal(SIGTTIN, SIG_IGN);
+    signal(SIGTTOU, SIG_IGN);
+
+    if (tcgetattr(STDIN_FILENO, &saved_tty) == 0)
+        tty_saved = 1;
+
+    raw = saved_tty;
+    raw.c_lflag &= ~(ICANON | ECHO | ISIG);
+    raw.c_iflag &= ~(IXON | ICRNL);
+    raw.c_cc[VMIN]  = 0;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+    {
+        struct sigaction sa;
+        sa.sa_handler = sigint_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, (struct sigaction *)0);
+    }
+
+    memset((char *)Keyboard, 0, sizeof(Keyboard));
+    MousePresent   = 0;
+    JoyNumButtons  = 0;
+
+    /* 150ms busy-wait for terminal to settle after VA2000 opens.
+     * Cannot use select(0,...,&tv) here: SA_RESTART on SIGALRM causes
+     * it to restart indefinitely and IN_Startup never returns. */
+    {
+        struct timeval t0, now;
+        gettimeofday(&t0, (struct timezone *)0);
+        do {
+            gettimeofday(&now, (struct timezone *)0);
+        } while ((now.tv_sec - t0.tv_sec) * 1000000L +
+                 (now.tv_usec - t0.tv_usec) < 150000L);
+    }
+
+    /* Drain any residue from stdin. */
+    {
+        unsigned char buf[256];
+        struct timeval tv;
+        fd_set rfds;
+        int n;
+        do {
+            tv.tv_sec = 0; tv.tv_usec = 0;
+            FD_ZERO(&rfds); FD_SET(STDIN_FILENO, &rfds);
+            if (select(STDIN_FILENO+1, &rfds, (fd_set *)0, (fd_set *)0, &tv) <= 0) break;
+            n = read(STDIN_FILENO, (char *)buf, sizeof(buf));
+        } while (n > 0);
+    }
+
+}
+
+void
+IN_Shutdown()
+{
+    if (tty_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &saved_tty);
+        tty_saved = 0;
+    }
+    signal(SIGINT, SIG_DFL);
+}
+
+void
+IN_ProcessEvents()
+{
+    unsigned char buf[8];
+    int           n;
+    int           sc;
+    struct timeval tv;
+    fd_set         rfds;
+
+    memset((char *)Keyboard, 0, sizeof(Keyboard));
+
+    for (;;) {
+        tv.tv_sec  = 0;
+        tv.tv_usec = 0;
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        if (select(STDIN_FILENO + 1, &rfds, (fd_set *)0, (fd_set *)0, &tv) <= 0)
+            break;
+
+        n = read(STDIN_FILENO, (char *)buf, sizeof(buf));
+        if (n < 0)
+            break;
+        if (n == 0)
+            break;
+
+        sc = 0;
+
+        /* Lone ESC: busy-wait up to 5ms for the rest of the escape sequence.
+         * AMIX's tty driver may deliver ESC separately from [ A on the first
+         * read; a second immediate non-blocking read often gets nothing even
+         * though the rest is in transit.  select() cannot be used here because
+         * SA_RESTART on SIGALRM would cause it to restart forever. */
+        if (n == 1 && buf[0] == AMX_ESC) {
+            struct timeval t0, tnow;
+            int n2;
+            gettimeofday(&t0, (struct timezone *)0);
+            do {
+                n2 = read(STDIN_FILENO, (char *)(buf+1), (int)(sizeof(buf)-1));
+                if (n2 > 0) { n += n2; break; }
+                gettimeofday(&tnow, (struct timezone *)0);
+            } while ((tnow.tv_sec  - t0.tv_sec)  * 1000000L +
+                     (tnow.tv_usec - t0.tv_usec) < 5000L);
+        }
+
+        /* AMIX console uses 8-bit CSI (0x9b) instead of the two-byte ESC [
+         * sequence for arrow and navigation keys. */
+        if (n >= 2 && (unsigned char)buf[0] == 0x9b) {
+            switch (buf[1]) {
+            case 'A': sc = sc_UpArrow;    break;
+            case 'B': sc = sc_DownArrow;  break;
+            case 'C': sc = sc_RightArrow; break;
+            case 'D': sc = sc_LeftArrow;  break;
+            case '1': if (n >= 3 && buf[2] == '~') sc = sc_Home;   break;
+            case '2': if (n >= 3 && buf[2] == '~') sc = sc_Insert; break;
+            case '3': if (n >= 3 && buf[2] == '~') sc = sc_Delete; break;
+            case '4': if (n >= 3 && buf[2] == '~') sc = sc_End;    break;
+            case '5': if (n >= 3 && buf[2] == '~') sc = sc_PgUp;   break;
+            case '6': if (n >= 3 && buf[2] == '~') sc = sc_PgDn;   break;
+            case '7': if (n >= 3 && buf[2] == '~') sc = sc_Home;   break;
+            case '8': if (n >= 3 && buf[2] == '~') sc = sc_End;    break;
+            case '9': if (n >= 3 && buf[2] == '~') sc = sc_PgDn;   break;
+            default:  break;
+            }
+        } else if (n == 1) {
+            unsigned char c = buf[0];
+            if (c == AMX_CTRL_C) {
+                quit_requested = 1; sc = sc_Escape; LastASCII = 0;
+            } else if (c == AMX_RETURN || c == '\n') {
+                sc = sc_Return; LastASCII = '\r';
+            } else if (c == AMX_ESC) {
+                sc = sc_Escape; LastASCII = 0;
+            } else if (c == AMX_SPACE) {
+                sc = sc_Space; LastASCII = ' ';
+            } else if (c == AMX_TAB) {
+                sc = sc_Tab; LastASCII = '\t';
+            } else if (c >= 0x01 && c <= 0x1a) {
+                sc = sc_Control; LastASCII = 0;
+            } else if (c >= 0x20 && c < 0x7f) {
+                sc = (int)c; LastASCII = (char)c;
+            }
+        } else if (n >= 3 && buf[0] == AMX_ESC && buf[1] == '[') {
+            /* 7-bit CSI fallback (ESC [ X) — not used by AMIX console but
+             * kept for completeness. */
+            switch (buf[2]) {
+            case 'A': sc = sc_UpArrow;    break;
+            case 'B': sc = sc_DownArrow;  break;
+            case 'C': sc = sc_RightArrow; break;
+            case 'D': sc = sc_LeftArrow;  break;
+            case '1': if (n >= 4 && buf[3] == '~') sc = sc_Home;   break;
+            case '2': if (n >= 4 && buf[3] == '~') sc = sc_Insert; break;
+            case '3': if (n >= 4 && buf[3] == '~') sc = sc_Delete; break;
+            case '4': if (n >= 4 && buf[3] == '~') sc = sc_End;    break;
+            case '5': if (n >= 4 && buf[3] == '~') sc = sc_PgUp;   break;
+            case '6': if (n >= 4 && buf[3] == '~') sc = sc_PgDn;   break;
+            default:  break;
+            }
+        } else if (n >= 3 && buf[0] == AMX_ESC && buf[1] == 'O') {
+            switch (buf[2]) {
+            case 'P': sc = sc_F1; break;
+            case 'Q': sc = sc_F2; break;
+            case 'R': sc = sc_F3; break;
+            case 'S': sc = sc_F4; break;
+            default:  break;
+            }
+        }
+
+        if (sc > 0 && sc < 256) {
+            Keyboard[sc] = 1;
+            LastScan = (ScanCode)sc;
+        }
+    }
+}
+
+void
+IN_WaitAndProcessEvents()
+{
+    SDL_Delay(5);
+    IN_ProcessEvents();
+}
+
+void
+IN_ClearKeysDown()
+{
+    memset((char *)Keyboard, 0, sizeof(Keyboard));
+    LastScan  = 0;
+    LastASCII = 0;
+}
+
+void
+IN_ReadControl(player, info)
+int         player;
+ControlInfo *info;
+{
+    IN_ProcessEvents();
+
+    /* dir_None == 8 (last enum value), NOT 0 (dir_North). memset to 0
+     * would permanently report dir_North and spin the menu forever. */
+    info->button0 = 0; info->button1 = 0;
+    info->button2 = 0; info->button3 = 0;
+    info->x = 0; info->y = 0;
+    info->xaxis = 0; info->yaxis = 0;
+    info->dir = dir_None;
+
+    if (Keyboard[sc_UpArrow]    || Keyboard[sc_W]) { info->yaxis = motion_Up;   info->dir = dir_North; }
+    if (Keyboard[sc_DownArrow]  || Keyboard[sc_S]) { info->yaxis = motion_Down; info->dir = dir_South; }
+    if (Keyboard[sc_LeftArrow]  || Keyboard[sc_A]) { info->xaxis = motion_Left; info->dir = dir_West; }
+    if (Keyboard[sc_RightArrow] || Keyboard[sc_D]) { info->xaxis = motion_Right; info->dir = dir_East; }
+
+    /* button0 = select/fire: Ctrl or Enter.  HandleMenu treats button0
+     * as SELECT (exit=1).  Space and Enter must NOT go to button1 or
+     * they would trigger exit=2 (BACK) instead. */
+    if (Keyboard[sc_Control] || Keyboard[sc_Return]) { info->button0 = 1; }
+    /* button1 = back/strafe: Alt only. */
+    if (Keyboard[sc_Alt]) { info->button1 = 1; }
+}
+
+void
+IN_StartAck()
+{
+    IN_ClearKeysDown();
+}
+
+boolean
+IN_CheckAck()
+{
+    IN_ProcessEvents();
+    if (LastScan)
+        return 1;
+    return 0;
+}
+
+boolean
+IN_UserInput(delay)
+longword delay;
+{
+    longword start;
+    /* Clear any leftover LastScan from a previous IN_Ack call. */
+    LastScan = 0;
+    start = (longword)SDL_GetTicks();
+    do {
+        IN_ProcessEvents();
+        if (LastScan)
+            return 1;
+        SDL_Delay(5);
+    } while ((longword)SDL_GetTicks() - start < delay * 100UL / 7UL);
+    return 0;
+}
+
+char
+IN_WaitForASCII()
+{
+    char c;
+    IN_StartAck();
+    do { IN_WaitAndProcessEvents(); } while (!LastASCII);
+    c = LastASCII; LastASCII = 0;
+    return c;
+}
+
+ScanCode
+IN_WaitForKey()
+{
+    ScanCode sc;
+    IN_StartAck();
+    do { IN_WaitAndProcessEvents(); } while (!LastScan);
+    sc = LastScan; LastScan = 0;
+    return sc;
+}
+
+void IN_StopDemo()       {}
+void IN_FreeDemoBuffer() {}
+
+void
+IN_Ack()
+{
+    IN_StartAck();
+    do { IN_WaitAndProcessEvents(); } while (!IN_CheckAck());
+    /* Consume the ack key so the next IN_UserInput doesn't see stale LastScan. */
+    LastScan  = 0;
+    LastASCII = 0;
+}
+
+void IN_GetJoyAbs(joy, xp, yp) word joy; word *xp; word *yp; { *xp = 0; *yp = 0; }
+void IN_SetupJoy(joy, minx, maxx, miny, maxy) word joy; word minx, maxx, miny, maxy; {}
+word IN_GetJoyButtonsDB(joy) word joy; { return 0; }
+void IN_GetMouseDelta(dx, dy) int *dx; int *dy; { *dx = 0; *dy = 0; }
+int  IN_MouseButtons()          { return 0; }
+boolean IN_JoyPresent()         { return 0; }
+void IN_SetJoyCurrent(idx)      int idx; {}
+int  IN_JoyButtons()            { return 0; }
+void IN_GetJoyDelta(dx, dy)     int *dx; int *dy; { *dx = 0; *dy = 0; }
+void IN_GetJoyFineDelta(dx, dy) int *dx; int *dy; { *dx = 0; *dy = 0; }
+bool    IN_IsInputGrabbed()     { return 0; }
+void IN_CenterMouse()           {}
