@@ -14,6 +14,10 @@
 
 CROSS_BIN ?= $(HOME)/opt/amix-cross/bin
 CC         = $(CROSS_BIN)/m68k-cbm-sysv4-gcc
+# Hand-written assembly goes to `as` directly, never through the gcc wrapper.
+# That wrapper rewrites compare operands to compensate for a gcc quirk, and
+# would reverse hand-written ones.  See docs/TOOLCHAIN.md §1.
+AS         = $(CROSS_BIN)/m68k-cbm-sysv4-as
 
 # ARCH decides more than which CPUs the binary loads on.  At -m68020 gcc emits
 # FSGLMUL/FSGLDIV for single-precision multiply and divide -- and neither is
@@ -40,6 +44,18 @@ OPT_NONE   =
 
 DEFINES    = -DAMIX
 INCLUDES   = -Isrc
+
+# Hand-written assembly.  Off by default: measured on real 68060 silicon it is
+# 0.9% SLOWER than what gcc 2.7.2.3 makes of the same loop in C, on the water
+# map that exercises it.  Kept because it is correct and documented, and
+# because src/d_scan_amix.s is the worked example of converting the AmigaOS
+# port's vasm assembly to this assembler.  See docs/BENCHMARKS.md.
+#   d_scan_amix   D_DrawTurbulent8Span
+ASM       ?= no
+ifeq ($(ASM),yes)
+ASM_SRCS   = d_scan_amix
+DEFINES   += -DUSE_ASM_TURB=1
+endif
 CFLAGS     = $(ARCH_FLAGS) $(OPT_FLAGS) $(DEFINES) $(INCLUDES)
 CFLAGS_NO  = $(ARCH_FLAGS) $(OPT_NONE) $(DEFINES) $(INCLUDES)
 
@@ -88,7 +104,7 @@ $(error VIDEO must be one of: null va2000)
 endif
 
 SRCS = $(CORE) $(PLATFORM) $(STUBS) $(VIDEO_SRC)
-OBJS = $(patsubst %,$(OBJDIR)/%.o,$(SRCS))
+OBJS = $(patsubst %,$(OBJDIR)/%.o,$(SRCS)) $(patsubst %,$(OBJDIR)/%.o,$(ASM_SRCS))
 
 # ---------------------------------------------------------------------- rules
 
@@ -103,6 +119,10 @@ $(TARGET): $(OBJS)
 $(OBJDIR)/%.o: $(SRCDIR)/%.c
 	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJDIR)/%.o: $(SRCDIR)/%.s
+	@mkdir -p $(OBJDIR)
+	$(AS) -m$(ARCH) -o $@ $<
 
 # Per-file optimizer opt-outs go here, each with the symptom that earned it:
 #   $(OBJDIR)/foo.o: $(SRCDIR)/foo.c
@@ -120,5 +140,6 @@ config:
 	@echo "VIDEO    : $(VIDEO) -> $(VIDEO_SRC).c"
 	@echo "C files  : $(words $(SRCS))"
 	@echo "ARCH     : $(ARCH)"
+	@echo "ASM      : $(ASM) $(ASM_SRCS)"
 
 .PHONY: all clean config

@@ -90,6 +90,45 @@ starting point rather than a disappointing one. The obvious remaining headroom
 is the same assembly: `d_scan_68k.s` exists in the AmigaOS port, in vasm syntax,
 and would need converting for GNU as.
 
+## Hand-written assembly did not beat the compiler
+
+`src/d_scan_amix.s` is `D_DrawTurbulent8Span` converted from the AmigaOS port's
+vasm assembly to this assembler. `demo2` runs on e1m4, the water map, so it
+exercises the routine properly:
+
+| `demo2`, 985 frames | Seconds | fps |
+|---|--:|--:|
+| C, compiled by gcc 2.7.2.3 | 130.7 | 7.5 |
+| hand-written assembly | 131.9 | 7.5 |
+
+**0.9% slower**, on a clean machine both times. The routine is a short integer
+loop dominated by two dependent memory accesses — the sine-table lookup and the
+texel fetch — and gcc schedules it about as well as the hand-written version
+does. `ASM=no` is therefore the default.
+
+This is worth knowing before anyone spends time on the span drawer: the
+assembly route is not the easy win it looks like. `D_DrawSpans8` has more state
+and might reward hand-tuning more, but the expectation should be tempered by
+this result rather than by the assembly's provenance.
+
+### The span drawer in that file was not converted, and should not be
+
+`d_scan_68k.s` in the AmigaOS port also contains a `D_DrawSpans8`. It does not
+implement what `d_scan.c`'s `D_DrawSpans8` does:
+
+- the C recomputes the perspective every 8 pixels — fresh `sdivz`, `tdivz`,
+  `zi`, `z`, `snext`, `tnext`, `sstep`, `tstep` per segment. The assembly
+  computes one `sstep` for a whole span, so long spans would visibly warp.
+- it has no `tstep` at all.
+- it destroys `t`: the inner loop keeps `t` in `%d3`, then loads the fetched
+  texel into `%d3`. From the second pixel of every span onward, the t
+  coordinate is the previous pixel's colour index.
+- it reads and writes the z-buffer, which `D_DrawSpans8` does not touch, and
+  tests "transparency" against a register overwritten two instructions earlier.
+
+A faithful conversion would have produced a faster renderer that draws the
+wrong thing. Writing a correct one from the C is a separate piece of work.
+
 ## Under Amiberry — do not use these as numbers
 
 | Run | Seconds | fps | Host doing |
