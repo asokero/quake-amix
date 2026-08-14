@@ -40,6 +40,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "d_local.h"
 
+// AMIX's <sys/mman.h> declares mmap() and nothing else -- no munmap.  Declared
+// K&R style, as the header declares mmap, so there is no prototype to disagree
+// with the library symbol.
+extern int munmap();
+
 viddef_t	vid;				// global video state
 
 #define	BASEWIDTH	320

@@ -87,9 +87,24 @@ from here:
 Set it from the Quake console (`~`), or put `in_keyhold 400` in
 `/quake/id1/autoexec.cfg`.
 
-**To quit**, use ESC → the menu → Quit → `y`. Only keys that are mapped are
-needed for that path: ESC, the arrows, Enter and `y`. Function keys are not
-mapped, so Quake's usual F10 will not work.
+**A tty cannot see modifier keys.** Ctrl, Shift and Alt never arrive as keys of
+their own — Ctrl+A is just byte 0x01 — so every default bind that uses one is
+dead. Quake binds attack to Ctrl, which means **you cannot shoot** until you
+rebind. Put this in `/quake/id1/autoexec.cfg` before the first run:
+
+```
+bind SPACE +attack
+bind ALT +jump
+in_keyhold 400
+```
+
+(`ALT` there is the literal string Quake parses for its own K_ALT; it will not
+fire either, so pick a letter key instead if jumping matters —
+`bind j +jump`.)
+
+**To quit**, use ESC → the menu → Quit → `y`. Only mapped keys are needed for
+that path: ESC, the arrows, Enter and `y`. Function keys are not mapped, so
+Quake's usual F10 will not work.
 
 ## If it goes wrong
 
