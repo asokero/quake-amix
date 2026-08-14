@@ -175,10 +175,15 @@ Two more things to know when reading the output:
 - **stdout is block-buffered.** `run.log` will look like it stopped mid-load
   while the process is alive and well; the tail of the buffer is only lost if
   the process dies. Judge liveness from `ps`, not from the log.
-- Sustained heavy tftp plus repeated execs is the documented reproducer for the
-  kernel port's ISSUE-10 corruption (`kernelsupport/KNOWN-ISSUES.md`), which
-  once left this guest unresponsive on both console and network. If the guest
-  wedges after a lot of file transfer, suspect that before suspecting Quake.
+- **Heavy disk I/O makes the guest look dead, and it isn't.** Copying the
+  18.7 MB `pak0.pak` into place saturates the emulated machine for minutes:
+  telnet connections are closed as soon as they are opened, and the console
+  stops echoing. It comes back on its own once the copy finishes. During this
+  port's bring-up that was mistaken three times for a kernel wedge — including
+  a confident but wrong attribution to the kernel port's ISSUE-10 — before the
+  simple test settled it: type into the Amiberry window, and if it responds
+  later, nothing was ever broken. Judge liveness that way, and be patient
+  rather than reaching for a diagnosis.
 
 ## Known-good reference points
 

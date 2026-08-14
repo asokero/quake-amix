@@ -176,6 +176,8 @@ time to find. The short version:
   sessions eventually wedges the guest.
 - Long-running processes need `nohup`, or closing the telnet session SIGHUPs
   them. A "crash" that leaves no exit code is usually this.
+- Heavy disk I/O (the 18.7 MB pak copy) makes the guest stop answering telnet
+  and the console for minutes. It is not wedged; wait.
 - TFTP tops out at 16,776,704 bytes: AMIX's client treats the block number as
   signed 16-bit. `pak0.pak` is 18.7 MB, so it must be split — see
   `docs/EMULATOR.md`.

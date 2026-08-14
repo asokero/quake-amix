@@ -369,20 +369,6 @@ void Sys_LowFPPrecision (void)
 }
 #endif
 
-/*
-================
-Sys_SendKeyEvents
-
-Pump the platform input device into the key queue.  id's svgalib port keeps
-this in vid_svgalib.c; on AMIX the keyboard is a plain tty, so it belongs to
-in_amix.c once that exists.  Empty here: with in_null.c there is no input,
-which is exactly what a dedicated server wants.
-================
-*/
-void Sys_SendKeyEvents (void)
-{
-}
-
 int main (int c, char **v)
 {
 

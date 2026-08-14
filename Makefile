@@ -62,7 +62,7 @@ PLATFORM = sys_amix net_amix
 # Sound and CD are stubs for now: the first target is a working renderer, and
 # AMIX has no audio driver in this project yet.  snd_null replaces the whole
 # snd_dma/snd_mem/snd_mix set, so those three are deliberately absent from CORE.
-STUBS = snd_null cd_null in_null
+STUBS = snd_null cd_null in_amix
 
 # Video backend.  null renders into a malloc'd buffer and displays nothing,
 # which is what the dedicated-server and pure-rasterisation benchmarks want.
