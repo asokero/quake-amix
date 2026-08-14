@@ -6,7 +6,8 @@ treat every step as a claim to be checked, and the "if it goes wrong" section as
 the part most likely to be needed.
 
 Target: Amiga 3000 with a 68040 or 68060 card, the AMIX 68040/68060 kernel port,
-and an MNT VA2000. Machine is `10.0.10.10`, root / `s0l0n`.
+and an MNT VA2000. Machine is `10.0.10.10`, logged in as root; ask the user
+for the password rather than keeping it in this repository.
 
 ## What to copy
 

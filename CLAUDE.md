@@ -182,6 +182,7 @@ time to find. The short version:
   signed 16-bit. `pak0.pak` is 18.7 MB, so it must be split — see
   `docs/EMULATOR.md`.
 
-Real hardware is `10.0.10.10` (root/`s0l0n`), file transfer via the NAS share
+Real hardware is `10.0.10.10`, root login (ask the user for the password --
+do not record it here), file transfer via the NAS share
 `/mnt/nasu/` on AMIX, `/run/user/12044/gvfs/smb-share:server=nasu.local,share=public/`
 on Linux.

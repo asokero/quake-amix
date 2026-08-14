@@ -66,10 +66,12 @@ def main():
     cmds = sys.argv[1:]
     s = socket.create_connection((HOST, PORT), timeout=15)
     drain(s, quiet=2.0)
-    s.sendall(b"root\r\n")
+    s.sendall(os.environ.get("AMIX_USER", "root").encode() + b"\r\n")
     banner = drain(s, quiet=3.0)
     if b"assword" in banner:
-        s.sendall(b"\r\n")
+        # Password from the environment only.  The emulator guest has none;
+        # the real machine does, and it does not belong in this repository.
+        s.sendall(os.environ.get("AMIX_PASS", "").encode() + b"\r\n")
         banner += drain(s, quiet=3.0)
     sys.stdout.write(banner.decode("latin1", "replace"))
     for c in cmds:

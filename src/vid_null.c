@@ -27,12 +27,11 @@ viddef_t	vid;				// global video state
 #define	BASEWIDTH	320
 #define	BASEHEIGHT	200
 
-byte	vid_buffer[BASEWIDTH*BASEHEIGHT];
-short	zbuffer[BASEWIDTH*BASEHEIGHT];
-byte	surfcache[256*1024];
-
 unsigned short	d_8to16table[256];
 unsigned	d_8to24table[256];
+
+static int	VID_highhunkmark;
+static byte	*vid_surfcache;
 
 void	VID_SetPalette (unsigned char *palette)
 {
@@ -44,17 +43,39 @@ void	VID_ShiftPalette (unsigned char *palette)
 
 void	VID_Init (unsigned char *palette)
 {
+	int	bsize, zsize, tsize;
+
 	vid.maxwarpwidth = vid.width = vid.conwidth = BASEWIDTH;
 	vid.maxwarpheight = vid.height = vid.conheight = BASEHEIGHT;
-	vid.aspect = 1.0;
 	vid.numpages = 1;
 	vid.colormap = host_colormap;
 	vid.fullbright = 256 - LittleLong (*((int *)vid.colormap + 2048));
-	vid.buffer = vid.conbuffer = vid_buffer;
 	vid.rowbytes = vid.conrowbytes = BASEWIDTH;
-	
-	d_pzbuffer = zbuffer;
-	D_InitCaches (surfcache, sizeof(surfcache));
+
+	// Same aspect expression the real driver uses, so that a timedemo run
+	// here and one through the VA2000 differ only by the display.
+	vid.aspect = ((float)vid.height / (float)vid.width) * (320.0 / 240.0);
+
+	// id's stub allocates a fixed 256 KB surface cache.  That is well under
+	// the 600 KB D_SurfaceCacheForRes wants at 320x200, and an undersized
+	// cache thrashes -- surfaces get flushed and rebuilt that would otherwise
+	// have been kept.  It costs frames, which makes the stub useless as a
+	// baseline: a comparison against the VA2000 build would be measuring the
+	// cache size as much as the display.  Allocate what the renderer asks
+	// for, exactly as vid_va2000.c does.
+	bsize = vid.rowbytes * vid.height;
+	tsize = D_SurfaceCacheForRes (vid.width, vid.height);
+	zsize = vid.width * vid.height * sizeof(*d_pzbuffer);
+
+	VID_highhunkmark = Hunk_HighMark ();
+	d_pzbuffer = Hunk_HighAllocName (bsize + tsize + zsize, "video");
+	if (!d_pzbuffer)
+		Sys_Error ("VID_Init: not enough memory for video buffers");
+
+	vid_surfcache = ((byte *)d_pzbuffer) + zsize;
+	vid.conbuffer = vid.buffer = (pixel_t *)(((byte *)d_pzbuffer) + zsize + tsize);
+
+	D_InitCaches (vid_surfcache, tsize);
 }
 
 void	VID_Shutdown (void)
