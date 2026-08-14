@@ -90,6 +90,46 @@ starting point rather than a disappointing one. The obvious remaining headroom
 is the same assembly: `d_scan_68k.s` exists in the AmigaOS port, in vasm syntax,
 and would need converting for GNU as.
 
+## -O2 does not break anything, and is slower
+
+| `demo1`, 969 frames | Seconds | fps |
+|---|--:|--:|
+| `-O` | **137.1** | **7.1** |
+| `-O2` | 142.5 | 6.8 |
+| `-O2 -fno-schedule-insns -fno-schedule-insns2` | 142.4 | 6.8 |
+
+**3.9% slower**, consistently, so there is no reason to adopt it. Instruction
+scheduling is not the cause — disabling it changes the binary and not the time.
+The likely culprit is code growth (371 → 377 KB) against the 68060's 8 KB
+instruction cache.
+
+Worth recording because gcc 2.7.2.3 at -O2 was a real unknown: wolf3d-amix
+found this same compiler both hanging at `-O` on one file and miscompiling
+another *without* `-O`. Here all 75 files compile, none hangs, and -O2
+introduces no instruction mnemonic that -O did not already use — so none of the
+assembler mismatches in `docs/TOOLCHAIN.md` are newly exposed.
+
+### Proving it renders the same, rather than assuming
+
+An identical frame count proves nothing about pixels. `vid_null.c` has two
+`#ifdef` hooks for settling this, and they are the tool for any future
+optimisation, not just this one:
+
+```sh
+make DEFINES="-DAMIX -DVID_CHECKSUM"                      # per-frame checksums
+make DEFINES="-DAMIX -DVID_CHECKSUM -DVID_DUMP_FRAME=800" # dump frame 800, then quit
+```
+
+Both builds' frame 200 and frame 800 of `demo1` came out **byte-identical,
+0 pixels different of 64000**. -O2 renders exactly what -O renders.
+
+One trap, since it cost a wrong conclusion first time: a *cumulative* checksum
+is useless here. Frames drawn while the map loads contain whatever console text
+had been printed by then, which is timing-dependent, so a single early
+difference poisons every later value — two builds that render the demo
+identically still disagree at every checkpoint. The checksum is per frame now,
+and a dumped frame is what actually settles a disagreement.
+
 ## Hand-written assembly did not beat the compiler
 
 `src/d_scan_amix.s` is `D_DrawTurbulent8Span` converted from the AmigaOS port's

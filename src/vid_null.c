@@ -84,6 +84,58 @@ void	VID_Shutdown (void)
 
 void	VID_Update (vrect_t *rects)
 {
+#ifdef VID_CHECKSUM
+	// Does an optimisation change what gets drawn, or only how fast?  A
+	// timedemo cannot say -- it reports frames and seconds, and identical
+	// frame counts prove nothing about pixels.  Demo playback is
+	// deterministic, so comparing frames between two builds does.
+	//
+	// The checksum is PER FRAME, not cumulative.  A running total was tried
+	// first and was worse than useless: frames drawn while the map loads show
+	// whatever console text had been printed by then, which is timing
+	// dependent, so one early difference poisons every later value and two
+	// builds that render the demo identically still disagree everywhere.
+	//
+	// Cheap and order-sensitive rather than a real CRC; it only has to catch
+	// a difference, not resist one.  VID_DUMP_FRAME below is the tiebreaker:
+	// a checksum says two builds differ, a dumped frame says by how many
+	// pixels -- a handful means floating-point rounding moved a texture
+	// coordinate, tens of thousands means the renderer is broken.
+	static int		frame;
+	unsigned long		sum;
+	unsigned char		*p;
+	int			i, n;
+
+	p = (unsigned char *)vid.buffer;
+	n = vid.rowbytes * vid.height;
+	sum = 0;
+	for (i = 0; i < n; i++)
+		sum = (sum << 1) + (sum >> 31) + p[i];
+
+	frame++;
+	if ((frame % 200) == 0)
+		Sys_Printf ("VIDSUM frame %ld = %08lx\n", (long)frame, sum);
+
+	// A checksum says two builds differ; it cannot say by how much, and
+	// floating-point optimisation can legitimately move a texture coordinate
+	// by one ULP and with it a pixel.  Dumping one frame lets the difference
+	// be counted instead of guessed: a handful of pixels is rounding, tens of
+	// thousands is a broken renderer.
+	if (frame == VID_DUMP_FRAME)
+	{
+		int	h;
+
+		h = Sys_FileOpenWrite ("frame.raw");
+		if (h != -1)
+		{
+			Sys_FileWrite (h, vid.buffer, n);
+			Sys_FileClose (h);
+			Sys_Printf ("VIDDUMP frame %ld written, %ld bytes\n",
+				    (long)frame, (long)n);
+		}
+		Sys_Quit ();
+	}
+#endif
 }
 
 /*
