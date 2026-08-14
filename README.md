@@ -13,15 +13,19 @@ argument into a number.
 
 ## Status
 
-Milestone 1 — the engine, with no display driver in the way.
+**Milestone 1 reached: Quake runs on AMIX.** The dedicated server boots the
+engine, loads `pak0.pak`, runs the QuakeC VM, spawns `start.bsp` with all its
+models, and sits in the game loop accumulating CPU time — verified under
+Amiberry on the 68040 kernel (`68040-260812-06`).
 
-- [x] Cross toolchain able to build floating-point code (this took fixing, see below)
+- [x] Cross toolchain able to build this code at all — four bugs found and fixed, see below
 - [x] All 72 C files compile with GCC 2.7.2.3
 - [x] Links to an AMIX binary: `ELF 32-bit MSB executable, Motorola m68k, 68020, SYSV`
-- [ ] Runs `-dedicated` under Amiberry
+- [x] Runs `-dedicated` under Amiberry: PAK loaded, QuakeC VM live, map spawned
 - [ ] Runs on real hardware
 - [ ] VA2000 video backend
 - [ ] Playable at 320×200×8bpp
+- [ ] `timedemo` benchmark numbers
 
 Deferred on purpose: sound, networking (`src/net_amix.c` explains), other RTG
 cards (xsvga, zz9000).
@@ -38,11 +42,20 @@ make VIDEO=va2000       # once the VA2000 backend exists
 ```
 
 **`docs/TOOLCHAIN.md` is required reading before changing the build.** Getting
-floating-point code to compile at all needed toolchain work, and one of the
-problems was silent: GCC 2.7.2.3 emits floating-point compares with their
-operands reversed, and the register-to-register form assembles cleanly with the
-comparison inverted. 88 such instructions in a full Quake build. The fix lives
-in `gcc-cross-amix`'s wrapper; the analysis is in that document.
+this code to run at all needed four fixes to the toolchain, three of them
+silent — GCC 2.7.2.3 and binutils 2.8.1 disagree about several m68k mnemonics
+and one assembler directive, and the assembler takes the disagreement without
+complaint:
+
+| Problem | Effect | Count in a Quake build |
+|---|---|--:|
+| `.swbeg` emits nothing, gcc assumes 4 bytes | every jump-table `switch` branches mid-instruction | 21 |
+| `tdivs.l`/`tdivu.l` assemble as the 64-bit divide | every 32-bit `%` returns a stale register | 17 |
+| float compares emitted with operands reversed | register-to-register form silently inverts the comparison | 88 |
+| `fsglmul`/`fsgldiv` with a register source | rejected by the assembler (loud) | ~130 |
+
+The fixes live in `gcc-cross-amix`'s `amix-gcc-wrapper.sh`; the analysis, with
+the worked example that exposed each one, is in that document.
 
 ## Provenance and license
 

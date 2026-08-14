@@ -124,18 +124,51 @@ earned it.
 
 ## Current state
 
-Milestone 1 is the dedicated server: prove the engine — PAK loading, QuakeC VM,
-floating point, file I/O — before any display driver is a variable.
+**Milestone 1 is done: Quake runs on AMIX.** Verified under Amiberry on the
+68040 kernel `68040-260812-06`: `./quake -dedicated` loads `pak0.pak` (339
+files), initialises the 8 MB heap, runs the QuakeC VM, spawns `start.bsp` and
+precaches every model, then sits in the game loop with CPU time climbing.
 
-- Builds and links: 72 C files, `build/quake`, ELF 32-bit MSB m68k 68020 SYSV.
-- Not yet run on hardware or emulator.
-- `vid_va2000.c` not written yet.
+Not yet done: real hardware, `vid_va2000.c`, `timedemo` numbers, sound,
+networking.
 
-Testing: Amiberry has no VA2000 emulation, so the emulator can only run the
-dedicated/null path — which is exactly milestone 1. `kernelsupport/emu-reset-boot.sh
-[040|060]` boots it, serial on TCP:1234, binaries in over tftp.
-**Guest state is wiped on every run**, and `pak0.pak` is 18–26 MB, so the game
-data has to live in the golden image or come over NFS — not tftp.
+### If something breaks, suspect the toolchain first
+
+Three of the four toolchain bugs found so far were **silent** — the assembler
+accepted what gcc wrote and encoded something else. Symptoms looked like
+application logic bugs every time: a texture-animation group that "lost" one
+frame (it was `%` returning a stale register), and a SIGILL at a PC that
+disassembled to `chk2.b` (it was a `switch` jumping four bytes past its case).
+
+Before debugging Quake, check the generated assembly:
+
+```sh
+m68k-cbm-sysv4-gcc.real -S -O -DAMIX -Isrc src/foo.c -o /tmp/foo.s
+grep -cE '\.swbeg|tdiv[su]|fcmp' /tmp/foo.s
+```
+
+`docs/TOOLCHAIN.md` has the full analysis. The fixes are in
+`gcc-cross-amix/amix-gcc-wrapper.sh` and are **not committed there** — if that
+repo is ever reinstalled, they must be reapplied or everything silently breaks
+again.
+
+## Testing
+
+`docs/EMULATOR.md` has the working procedure and the traps, which cost real
+time to find. The short version:
+
+- Amiberry has no VA2000, so it can only run the `VIDEO=null` build.
+- The `login:` prompt goes to the Amiga console, **never to the serial log**.
+- Console keys need `sendkeys.py` over Amiberry IPC (xdotool does not work),
+  and the guest keymap is German.
+- Inbound telnet needs the guest to `ping 10.0.2.2` first.
+- `tools/amixsh.py` gives a scriptable shell. **Log out cleanly** — leaking
+  sessions eventually wedges the guest.
+- Long-running processes need `nohup`, or closing the telnet session SIGHUPs
+  them. A "crash" that leaves no exit code is usually this.
+- TFTP tops out at 16,776,704 bytes: AMIX's client treats the block number as
+  signed 16-bit. `pak0.pak` is 18.7 MB, so it must be split — see
+  `docs/EMULATOR.md`.
 
 Real hardware is `10.0.10.10` (root/`s0l0n`), file transfer via the NAS share
 `/mnt/nasu/` on AMIX, `/run/user/12044/gvfs/smb-share:server=nasu.local,share=public/`

@@ -61,6 +61,75 @@ these opcodes round the *result* to single precision regardless of how the
 source is named. The wrapper rewrites `.s`/`.d` to `.x` for register-to-register
 `fsglmul`/`fsgldiv`. ~130 instances in a Quake build; all fail loudly.
 
+## 1c. `.swbeg` — every jump-table switch branches into mid-instruction
+
+**The worst of the four. Silent, and it breaks ordinary control flow, not just
+arithmetic.**
+
+gcc 2.7.2.3 compiles a dense `switch` into a PC-relative jump table:
+
+```
+	mov.w .LD80(%pc,%d0.l*2),%d0
+	jmp 6(%pc,%d0.w)         | base = (jmp+2) + 6 = jmp+8
+	.swbeg &8                | SVR4 switch-table marker
+.L80:
+	.short .L75-.L80
+	...
+```
+
+`.swbeg` is an SVR4 assembler directive. **This gas accepts it and emits
+nothing**, so the table lands at `jmp+4` while the `jmp`'s hardcoded
+displacement of 6 aims at `jmp+8`. Every case target is therefore four bytes
+past where it should be — in the middle of an instruction. Execution runs off
+into whatever those bytes decode as.
+
+Proof, reduced:
+
+```
+	nop            | 2 bytes
+	.swbeg &8
+mark:                  | ends up at offset 2, not offset 6
+```
+
+The fix reserves the four bytes gcc counted on (`.swbeg &N` → `.long 0`). They
+sit between an unconditional `jmp` and the table, so they are never executed.
+
+21 jump tables in a Quake build, in 11 files — `pr_exec.c` (the QuakeC
+interpreter's dispatch), `cl_parse.c` (network message dispatch), `menu.c`,
+`sv_phys.c` and others. This is what made Quake die with SIGILL at a PC that
+adb disassembled as `chk2.b -(%a4),%d2`, an instruction no C compiler emits.
+
+## 1d. `tdivs.l` / `tdivu.l` — every 32-bit `%` is wrong
+
+gcc emits `tdivs.l`/`tdivu.l` meaning DIVSL.L/DIVUL.L, the **32-bit-dividend**
+divide that returns quotient and remainder. This gas assembles those mnemonics
+as DIVS.L/DIVU.L, the **64-bit-dividend** form — extension word bit 10 set
+instead of clear:
+
+| written | encoding | bit 10 | dividend |
+|---|---|:--:|---|
+| `tdivs.l %d2,%d1:%d0` | `4c42 0c01` | 1 | 64-bit `%d1:%d0` |
+| `divsl.l %d2,%d1:%d0` | `4c42 0801` | 0 | 32-bit `%d0` — what gcc means |
+
+The 64-bit form reads the remainder register as the high half of the dividend,
+and gcc leaves whatever it last computed there. The quotient then overflows 32
+bits, the 68020 leaves the operands untouched on overflow, and the "remainder"
+is that stale value.
+
+Worked example, from the failure that exposed it — `anims[(j+1)%max]` with
+`max`=7, where gcc had just put `2*(j+1)` in `%d1` for the preceding statement:
+
+```
+j=0: dividend 8589934593  quotient fits    -> real remainder 2   (still wrong)
+j=1: dividend 17179869186 quotient OVERFLOW -> remainder = 4    (stale %d1)
+j=2:                      OVERFLOW          -> 6
+j=3..6:                   OVERFLOW          -> 8, 10, 12, 14
+```
+
+Observed indices were exactly 2, 4, 6, 8, 10, 12, 14. 17 occurrences in a Quake
+build, in `console.c`, `draw.c`, `mathlib.c`, `model.c`, `r_light.c`,
+`r_part.c`, `r_surf.c`, `snd_dma.c`.
+
 ## 2. The sysroot needs files the bootstrap does not install
 
 The `gcc-cross-amix` sysroot ships `libc.so.1` and the crt objects. That is
