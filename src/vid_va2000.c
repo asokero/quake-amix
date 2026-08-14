@@ -267,12 +267,61 @@ void VID_Shutdown (void)
 
 /*
 ================
+VA2000_CopyRow
+
+Copy one row to the board in 32-bit units.
+
+Not a micro-optimisation.  AMIX's libc memcpy is a byte loop -- literally
+`move.b (a1)+,(a0)+` around a `dbf` -- and the destination here is a Zorro II
+board, where every access is a bus cycle.  Byte writes to a 16-bit bus spend
+one cycle per byte, so a byte-wise memcpy costs four times the cycles of a
+long-word copy for the same data.  Measured over a whole timedemo, the frame
+copy was 62 ms of a 204 ms frame.
+
+Both ends are long-aligned in the common case: the framebuffer starts at a
+64 KB boundary, rows are 320 bytes, and vid.buffer comes off the hunk.  A
+rect whose x is not a multiple of four still has to be handled, hence the
+head and tail.
+================
+*/
+static void VA2000_CopyRow (byte *dst, byte *src, int count)
+{
+	unsigned long	*ld, *ls;
+	int		n;
+
+	// Head: bytes up to the first long boundary, and give up on the wide
+	// path entirely if the two ends cannot be aligned together.
+	if (((long)dst & 3) != ((long)src & 3))
+	{
+		while (count-- > 0)
+			*dst++ = *src++;
+		return;
+	}
+
+	while (count > 0 && ((long)dst & 3))
+	{
+		*dst++ = *src++;
+		count--;
+	}
+
+	ld = (unsigned long *)dst;
+	ls = (unsigned long *)src;
+	for (n = count >> 2; n > 0; n--)
+		*ld++ = *ls++;
+
+	dst = (byte *)ld;
+	src = (byte *)ls;
+	for (count &= 3; count > 0; count--)
+		*dst++ = *src++;
+}
+
+/*
+================
 VID_Update
 
-Copy the dirty rectangles out to the board.  Zorro II runs at roughly
-3.5 MB/s, so a full 320x200 frame costs on the order of 20 ms in bus time
-alone -- honouring the rect list rather than blitting everything is worth
-real frames here.
+Copy the dirty rectangles out to the board.  Honouring the rect list rather
+than blitting everything matters here: the board is on Zorro II, and the copy
+is a measurable fraction of the frame.
 ================
 */
 void VID_Update (vrect_t *rects)
@@ -290,7 +339,7 @@ void VID_Update (vrect_t *rects)
 
 		for (y = 0; y < rects->height; y++)
 		{
-			memcpy ((char *)dst, (char *)src, (size_t)rects->width);
+			VA2000_CopyRow (dst, src, rects->width);
 			src += vid.rowbytes;
 			dst += vid.rowbytes;
 		}

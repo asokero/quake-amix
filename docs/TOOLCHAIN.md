@@ -130,6 +130,50 @@ Observed indices were exactly 2, 4, 6, 8, 10, 12, 14. 17 occurrences in a Quake
 build, in `console.c`, `draw.c`, `mathlib.c`, `model.c`, `r_light.c`,
 `r_part.c`, `r_surf.c`, `snd_dma.c`.
 
+## 1e. The assembler architecture was pinned to 68020, and it cost 4x
+
+Not a miscompilation — a performance trap, and the largest single win found so
+far.
+
+`compile_one()` in the wrapper ran `as -m68020` regardless of what the compile
+asked for. `-m68040` therefore failed to assemble, and the project ran on
+68020 code generation without anyone choosing that.
+
+At `-m68020`, gcc compiles single-precision multiply and divide to **FSGLMUL**
+and **FSGLDIV**. Neither is implemented in the 68060's FPU. Every one of them
+takes an unimplemented-instruction trap and is executed by the FPSP in
+software. A Quake build contains **956** of them, in the renderer's hottest
+arithmetic:
+
+```
+$ objdump -d quake-null | grep -cE 'fsglmul|fsgldiv'
+956          # vs fmul 234, fdiv 80
+```
+
+At `-m68040` gcc emits **FSMUL** and **FSDIV** instead, which the 040 and the
+060 both execute in hardware:
+
+| flag | single-precision multiply | on 68060 |
+|---|---|---|
+| `-m68020` | `fsglmuls %fp@(12),%fp0` | traps to FPSP |
+| `-m68040` | `fsmuls %fp@(12),%fp0` | hardware |
+
+Measured on real 68060 silicon, `timedemo demo1` at 320x200, otherwise
+identical builds — see `docs/BENCHMARKS.md`.
+
+Passing the architecture through to the assembler needed three more mnemonic
+fixes, all of which fail loudly:
+
+| gcc emits | gas wants | why |
+|---|---|---|
+| `fsmul.s %fp1,%fp0` etc. | `.x` | a register source is extended precision; same rule as `fsgl*` above, now covering the whole FSxxx/FDxxx family |
+| `fdmov.d` | `fdmove.d` | gas knows `fsmov` by the short name but not `fdmov` — an asymmetry in its opcode table |
+| `fmovm.l %fpcr,%d0` | `fmovem.l` | from the float-to-int sequence; the suffixless register-list `fmovm` in prologues is fine |
+| `mov &16,%d1` | `mov.l &16,%d1` | same sequence, setting FPCR round-to-zero; gcc omits the size |
+
+**A 68040 binary does not run on a 68030.** `ARCH=68020` in the Makefile still
+builds the compatible one, at the cost above.
+
 ## 2. The sysroot needs files the bootstrap does not install
 
 The `gcc-cross-amix` sysroot ships `libc.so.1` and the crt objects. That is

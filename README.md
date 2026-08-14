@@ -22,10 +22,11 @@ Amiberry on the 68040 kernel (`68040-260812-06`).
 - [x] All 72 C files compile with GCC 2.7.2.3
 - [x] Links to an AMIX binary: `ELF 32-bit MSB executable, Motorola m68k, 68020, SYSV`
 - [x] Runs `-dedicated` under Amiberry: PAK loaded, QuakeC VM live, map spawned
-- [ ] Runs on real hardware
-- [ ] VA2000 video backend
-- [ ] Playable at 320×200×8bpp
-- [ ] `timedemo` benchmark numbers
+- [x] Runs on real hardware — Amiga 3000 + 68060, kernel `68060-260813-01`
+- [x] VA2000 video backend: **the game renders correctly on the board**, confirmed
+      on hardware, first try
+- [x] `timedemo` numbers: **7.1 fps** at 320×200, CPU only — see `docs/BENCHMARKS.md`
+- [ ] Playable: keyboard is written but untried; no mouse, no sound
 
 Deferred on purpose: sound, networking (`src/net_amix.c` explains), other RTG
 cards (xsvga, zz9000).

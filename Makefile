@@ -15,11 +15,21 @@
 CROSS_BIN ?= $(HOME)/opt/amix-cross/bin
 CC         = $(CROSS_BIN)/m68k-cbm-sysv4-gcc
 
-# -m68020 with hardware FPU is the deliberate baseline: one binary that runs on
-# the A3000's 68030+68882 and on the 68040/68060 accelerator cards.  Do not add
-# -m68040: the cross wrapper assembles with a hardcoded `as -m68020`, and 040-only
-# opcodes (fsmov/fdmov) would be rejected.
-ARCH_FLAGS = -m68020
+# ARCH decides more than which CPUs the binary loads on.  At -m68020 gcc emits
+# FSGLMUL/FSGLDIV for single-precision multiply and divide -- and neither is
+# implemented in the 68060's FPU, so every one of them traps into the FPSP and
+# is emulated in software.  A Quake build contains around 950 of them, in the
+# renderer's hottest arithmetic.  At -m68040 gcc emits FSMUL/FSDIV instead,
+# which both the 040 and the 060 execute in hardware.
+#
+#   ARCH=68040   (default) 68040 and 68060.  Measured on real 68060 silicon:
+#                see docs/BENCHMARKS.md for what this is worth.
+#   ARCH=68020   also runs on the A3000's 68030+68882, at the cost above.
+#
+# Needs the wrapper fix that passes the architecture through to the assembler;
+# older wrappers hardcode `as -m68020` and reject 040 opcodes.
+ARCH ?= 68040
+ARCH_FLAGS = -m$(ARCH)
 
 # GCC 2.7.2.3 is from 1995 and its optimizer is not trustworthy on this code.
 # The wolf3d-amix port found -O hangs on one file and, worse, found a file that
@@ -41,7 +51,7 @@ LIBS       = -lm -lc -lamixcompat
 
 SRCDIR     = src
 OBJDIR     = obj
-TARGET     = build/quake-$(VIDEO)
+TARGET     = build/quake-$(VIDEO)-$(ARCH)
 
 # ---------------------------------------------------------------- source lists
 
@@ -109,5 +119,6 @@ config:
 	@echo "LIBS     : $(LIBS)"
 	@echo "VIDEO    : $(VIDEO) -> $(VIDEO_SRC).c"
 	@echo "C files  : $(words $(SRCS))"
+	@echo "ARCH     : $(ARCH)"
 
 .PHONY: all clean config
