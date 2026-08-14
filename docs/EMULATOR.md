@@ -10,17 +10,45 @@ authority; what follows is the Quake-specific path through it.
 
 ## Boot
 
+This project has **its own Amiberry configuration, its own kernel copy and its
+own disk image**, and its own boot script:
+
 ```sh
-cd ~/kehitys/amix-playground/kernelsupport
-sh emu-reset-boot.sh 040 /tmp/quake-emu-serial.log
+sh tools/emu-quake.sh              # boot from the golden image (guest is wiped)
+sh tools/emu-quake.sh keep         # boot the existing disk, contents intact
+sh tools/emu-quake.sh snapshot     # make the current disk the new golden
 ```
 
-`040` or `060` picks the CPU config. The script restores the golden disk image
-first, so **every boot starts from a clean guest** — nothing you copied in
-survives. It also stages whatever kernel is in `build/unix-040-dbg`; check that
-this is the image you meant, its sha256 is recorded in `build/.emu-image`.
+Do **not** use the kernel project's `emu-reset-boot.sh` here. It stages
+whatever sits in `kernelsupport/build/unix-040-dbg` and restores that project's
+golden image, so a benchmark run writes into the kernel work's files — during
+this port's bring-up it twice booted a kernel that had been rebuilt underneath
+it, once a diagnostic build that would have invalidated any timing.
 
-Boot takes a couple of minutes.
+| | this project | kernel work | wolf3d |
+|---|---|---|---|
+| config | `a3000ux060-amixquake.uae` | `a3000ux*.uae` | `a3000ux-wolf3d.uae` |
+| serial | TCP 1236 | 1234 | 1235 |
+| telnet | localhost **2325** | 2323 | 2324 |
+| disk | `amix_hardfileX11R5-quake.hdf` | `…X11R5.hdf` | `…X11R5-wolf3d.hdf` |
+| kernel | `emu/kernel/unix-040-dbg` | `kernelsupport/build/…` | — (stock 030) |
+
+The kernel in `emu/kernel/` is a copy of `unix-040-quiet` under the name the
+guest's startup-sequence loads (`unix-040-dbg`). **Use a quiet build**: the
+diagnostic ones print on every page fault, which is not something to measure
+through. Update the copy deliberately when you want to test a newer kernel, and
+record which one a result came from.
+
+The only file shared with the kernel project is the AmigaOS boot volume
+`HD0-MAIN1-060-os32.hdf`, which that project's own three configs already share.
+
+### Game data, once
+
+`tools/emu-quake.sh snapshot` is the answer to re-transferring an 18.7 MB
+`pak0.pak` after every boot. Get the data into the guest, shut it down cleanly
+(`sync; sync; haltsys`), snapshot, and every later `emu-quake.sh` starts with
+the data already there. The golden is a sparse copy — 1 GB apparent, well under
+half that on disk.
 
 ### The serial log will not tell you the machine is up
 
@@ -67,6 +95,10 @@ option, logs in as root, runs each argument as a command and prints the output:
 ```sh
 python3 tools/amixsh.py 'uname -a' 'df -k'
 ```
+
+It defaults to port **2325**, this project's guest. `AMIX_PORT` and `AMIX_HOST`
+override it — `AMIX_PORT=2323` reaches the kernel project's guest, if one is
+running.
 
 It reads until the link goes quiet rather than matching a prompt, because
 Quake's own output contains `#`. Tune with `AMIX_QUIET` (seconds of silence

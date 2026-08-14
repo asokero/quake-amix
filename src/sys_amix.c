@@ -397,6 +397,16 @@ int main (int c, char **v)
 //	signal(SIGFPE, floating_point_exception_handler);
 	signal(SIGFPE, SIG_IGN);
 
+#ifdef AMIX
+	/* Unbuffered stdout.  Redirected to a file -- which is how anything
+	   long-running is watched here, since a telnet session that closes
+	   SIGHUPs the process -- stdio would otherwise block-buffer, so the log
+	   stops mid-load while the program is fine, and the tail is lost if it
+	   ever does die.  A timedemo's result line is the last thing printed,
+	   i.e. exactly what a full buffer swallows. */
+	setbuf (stdout, (char *)0);
+#endif
+
 	memset(&parms, 0, sizeof(parms));
 
 	COM_InitArgv(c, v);

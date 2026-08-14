@@ -10,3 +10,6 @@ id1/
 
 # Local config
 config.local.sh
+
+# Emulator kernel copies (large binaries belonging to the kernel project)
+emu/kernel/

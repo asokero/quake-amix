@@ -99,9 +99,12 @@ directly into the board.
 
 These come from the va2000 and wolf3d ports and are hard limits.
 
-- **K&R C.** GCC 2.7.2.3, no C99. Declarations at block start. New AMIX files use
-  K&R definitions, **one parameter per declaration line** — grouped declarations
-  (`int a, b;`) misalign the 68k stack.
+- **GCC 2.7.2.3, no C99.** Declarations at block start, no `//` comments in new
+  files. ANSI prototypes are fine and are what this tree uses throughout — the
+  "K&R, one parameter per declaration line" rule in the va2000 and wolf3d docs
+  is about AMIX's *native* `cc` compiling kernel drivers, and does not apply to
+  this cross-compiled user-space code. `src/vid_va2000.c` follows the
+  surrounding Quake style.
 - **`poll`, not `select`/`usleep`.** AMIX exports `poll` and `sysconf` from
   `libc.so.1` but not the BSD calls. See `Sys_ConsoleInput` in `sys_amix.c`.
 - **`SA_RESTART` is a trap.** With a periodic SIGALRM, `select`/`poll` restart
@@ -157,6 +160,13 @@ again.
 `docs/EMULATOR.md` has the working procedure and the traps, which cost real
 time to find. The short version:
 
+- **This project has its own Amiberry config, kernel copy and disk image**, and
+  its own boot script `tools/emu-quake.sh`. Do not use the kernel project's
+  `emu-reset-boot.sh`: it stages `kernelsupport/build/unix-040-dbg` and restores
+  that project's golden image, so a test run writes into the kernel work's
+  files. Ports here are serial 1236 and telnet **2325**.
+- Keep a **quiet** kernel in `emu/kernel/`; the diagnostic builds print on every
+  page fault, which no timing should be measured through.
 - Amiberry has no VA2000, so it can only run the `VIDEO=null` build.
 - The `login:` prompt goes to the Amiga console, **never to the serial log**.
 - Console keys need `sendkeys.py` over Amiberry IPC (xdotool does not work),

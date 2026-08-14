@@ -41,7 +41,7 @@ LIBS       = -lm -lc -lamixcompat
 
 SRCDIR     = src
 OBJDIR     = obj
-TARGET     = build/quake
+TARGET     = build/quake-$(VIDEO)
 
 # ---------------------------------------------------------------- source lists
 

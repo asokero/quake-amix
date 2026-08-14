@@ -12,7 +12,9 @@ Quake's own output contains '#'.
 """
 import os, socket, sys, time
 
-HOST, PORT = "127.0.0.1", 2323
+HOST = os.environ.get("AMIX_HOST", "127.0.0.1")
+# 2325 is this project's guest; the kernel work uses 2323 and wolf3d 2324.
+PORT = int(os.environ.get("AMIX_PORT", "2325"))
 IAC, DONT, DO, WONT, WILL, SB, SE = 255, 254, 253, 252, 251, 250, 240
 
 
