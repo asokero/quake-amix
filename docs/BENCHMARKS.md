@@ -28,8 +28,9 @@ is the CPU alone. Subtracting it gives what the board costs:
 ### The frame copy was paying four times over
 
 AMIX's libc `memcpy` is a byte loop — `move.b (a1)+,(a0)+` around a `dbf`. The
-destination is a Zorro II board, where every access is a bus cycle, and on a
-16-bit bus a byte write costs the same cycle a word write would. Copying
+destination is the board, where every access is a bus cycle, and on the 16-bit
+Zorro II bus it currently sits on, a byte write costs the same cycle a word
+write would. Copying
 64 KB a byte at a time therefore spends twice the bus cycles of a word copy and
 four times the loop overhead of a long-word one.
 
@@ -45,24 +46,27 @@ so some room remains — burst access, or moving the copy off the CPU.
 The display is now 17% of the frame, down from 30%. Extrapolating from the
 measured copy rate:
 
-| | copy | frame | fps |
-|---|--:|--:|--:|
-| today, 32-bit copy | 29.6 ms | 170 ms | 5.8 |
-| a perfect Zorro II copy (3.5 MB/s) | 18 ms | 159 ms | 6.3 |
-| Zorro III (~15 MB/s) | 4 ms | 145 ms | 6.9 |
+| | copy | frame | fps | vs today |
+|---|--:|--:|--:|--:|
+| **today**, 32-bit copy over Zorro II | 29.6 ms | 170 ms | **5.8** | — |
+| a perfect Zorro II copy (3.5 MB/s) | 18 ms | 159 ms | 6.3 | +0.5 |
+| Zorro III (~15 MB/s) | 4 ms | 145 ms | 6.9 | **+1.1** |
 
-So Zorro III is worth roughly **+0.6 fps over an ideal Zorro II copy** — the
-141 ms of rasterisation dominates everything else, and no bus improvement
-touches it.
+**The VA2000 is both a Zorro II and a Zorro III card, depending on firmware.**
+It runs in Zorro II mode here only because AMIX has no Zorro III support yet, so
+kernel Zorro III work would apply to this board directly — roughly +1.1 fps, or
+19%, on this benchmark.
 
-**And it would not apply to this card anyway: the VA2000 is a Zorro II board.**
-Kernel Zorro III support does not make a Zorro II card faster; it unlocks
-Zorro III cards such as the ZZ9000. Worth doing for its own reasons — just not
-as a Quake frame-rate measure.
+What it cannot do is more than that: rasterisation is 141 ms of a 170 ms frame,
+and no bus improvement touches it. Zorro III takes the display's share from 17%
+to about 3%, which is close to the whole of what is available on that side. The
+larger remaining win for this game is the rasteriser — and the AmigaOS port's
+hand-written `d_scan_68k.s` already exists, in vasm syntax, for whoever converts
+it to GNU as.
 
-The order of remaining wins for this game is therefore: the rasteriser first
-(141 ms, and the AmigaOS port's hand-written `d_scan_68k.s` exists in vasm
-syntax), then the bus.
+The proportions hold at higher resolutions, since Quake's rasterisation scales
+with pixel count much as the copy does; the absolute milliseconds grow on both
+sides.
 
 ### Why the flag is worth 3.6×
 
