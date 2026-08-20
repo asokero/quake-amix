@@ -18,6 +18,7 @@ identical apart from the flag named; both render the same frames.
 | `quake-null` | 68040 | 260819-13 | — | **129.9** | **7.5** | newer kernel, 5.5% faster on CPU alone |
 | `quake-va2000` | 68040 | 260819-13 | **Zorro III** | **141.0** | **6.9** | |
 | `quake-null`, **gcc 14.2.0** | 68060 | 260819-13 | — | **105.9** | **9.2** | same source, **22.6% faster** |
+| `quake-va2000`, **gcc 14.2.0** | 68060 | 260819-13 | Zorro III | **118.4** | **8.2** | playable build |
 
 `quake-null` renders into a malloc'd buffer and displays nothing, so its number
 is the CPU alone. Subtracting it gives what the board costs:
@@ -55,8 +56,18 @@ cmp fr-gcc27.raw fr-gcc14.raw   ->  identical, 64000 bytes
 obstacles that had to be cleared first, one of which — `-malign-int` — is the difference between a
 working program and one that runs correctly and prints absolutely nothing.
 
-Extrapolating to the display build, 105.9 s of CPU plus the measured 11.1 s of Zorro III copy would
-be about **8.3 fps** through the VA2000, against 6.9 today. Not measured yet.
+The display build was then measured too: **118.4 s, 8.2 fps** through the VA2000, against 6.9 with
+gcc 2.7.2.3. The extrapolation from CPU time plus the measured copy said 8.3, so for once the
+arithmetic held.
+
+Where the playable build has got to over this session:
+
+| | fps |
+|---|--:|
+| gcc 2.7, Zorro II, libc `memcpy` | 4.9 |
+| gcc 2.7, Zorro II, 32-bit copy | 5.8 |
+| gcc 2.7, Zorro III | 6.9 |
+| **gcc 14, Zorro III** | **8.2** |
 
 ### Zorro III: measured, and it paid
 

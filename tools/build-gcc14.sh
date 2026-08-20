@@ -9,7 +9,8 @@
 # Uses the Debian cross packages -- gcc-m68k-linux-gnu and binutils-m68k-linux-gnu,
 # which are already installed here for the kernel port's ELF inspection.
 #
-#   sh tools/build-gcc14.sh            -> build/quake-gcc14   (static)
+#   sh tools/build-gcc14.sh                  -> build/quake-gcc14         (no display)
+#   VIDEO=va2000 sh tools/build-gcc14.sh     -> build/quake-gcc14-va2000  (playable)
 #
 # Output is STATIC on purpose.  A dynamic build compiles and links but segfaults
 # inside AMIX's 1992 ld.so before main; static linking removes that from the
@@ -24,7 +25,13 @@ CRT="$SYSROOT/usr/ccs/lib"
 # The static libc lives only in a real AMIX tree; the cross sysroot ships the
 # shared one.  Override with AMIX_LIBC_A if yours is elsewhere.
 LIBCA="${AMIX_LIBC_A:-$HOME/kehitys/amix-playground/vanillarw/usr/ccs/lib/libc.a}"
-OUT="${OUT:-build/quake-gcc14}"
+VIDEO="${VIDEO:-null}"
+case "$VIDEO" in
+	null)   VIDEO_SRC=vid_null   ; SUFFIX= ;;
+	va2000) VIDEO_SRC=vid_va2000 ; SUFFIX=-va2000 ;;
+	*) echo "ERROR: VIDEO must be null or va2000"; exit 1 ;;
+esac
+OUT="${OUT:-build/quake-gcc14$SUFFIX}"
 OBJ="${OBJ:-obj-gcc14}"
 
 test -x "$(command -v $CC)"  || { echo "ERROR: $CC not found (apt install gcc-m68k-linux-gnu)"; exit 1; }
@@ -73,7 +80,7 @@ d_zpoint draw host host_cmd keys mathlib menu model net_dgrm net_loop net_main \
 net_vcr nonintel pr_cmds pr_edict pr_exec r_aclip r_alias r_bsp r_draw r_edge \
 r_efrag r_light r_main r_misc r_part r_sky r_sprite r_surf r_vars sbar screen \
 sv_main sv_move sv_phys sv_user view wad world zone \
-sys_amix net_amix snd_null cd_null in_amix vid_null"
+sys_amix net_amix snd_null cd_null in_amix $VIDEO_SRC"
 
 mkdir -p "$OBJ" build
 
