@@ -38,9 +38,18 @@ binutils 2.8.1, both period-correct for the target.
 
 ```sh
 export PATH=$HOME/opt/amix-cross/bin:$PATH
-make                    # dedicated/benchmark build, no display
-make VIDEO=va2000       # once the VA2000 backend exists
+make                    # build/quake-null-68040
+make VIDEO=va2000       # build/quake-va2000-68040
 ```
+
+Binaries are named `quake-<VIDEO>-<ARCH>`, so the two cannot overwrite each
+other and the wrong one cannot be shipped by accident.
+
+| Knob | Default | |
+|---|---|---|
+| `VIDEO` | `null` | `null` renders to memory and displays nothing — the benchmark and dedicated-server build. `va2000` drives the board. |
+| `ARCH` | `68040` | Runs on 68040 and 68060. `ARCH=68020` also runs on a 68030 and is **3.6× slower on a 68060** — see `docs/BENCHMARKS.md`. |
+| `ASM` | `no` | Hand-written assembly for `D_DrawTurbulent8Span`. Measured slower than the C; off for that reason. |
 
 **`docs/TOOLCHAIN.md` is required reading before changing the build.** Getting
 this code to run at all needed four fixes to the toolchain, three of them
