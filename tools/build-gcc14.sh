@@ -48,7 +48,15 @@ test -f "$LIBCA"             || { echo "ERROR: static libc.a missing: $LIBCA"; e
 #              through a vec3_t[162].  Both work and both are undefined
 #              behaviour, and gcc 14 reports having detected it, which means -O2
 #              is entitled to act on it.  gcc 2.7.2.3 never looked.
-OPT="${OPT:--O2}"
+# -O1, not -O2, and this is not caution.  At -O2 the renderer is fine -- frame
+# 800 of demo1 comes out byte-identical -- but starting a map crashes: the saved
+# frame pointer is overwritten with its top half replaced (0x80047060 becomes
+# 0x73007060) and the process dies in `unlk %a6`.  Demo playback never runs the
+# server, which is why the benchmark passes and `map start` does not.  -O1 makes
+# it go away, keeps most of the win (8.7 fps against 9.2 at -O2, versus 7.5 from
+# gcc 2.7.2.3), and renders the same identical frame.  The cause is not yet
+# found; the QuakeC VM and the entity spawning are the unexamined part.
+OPT="${OPT:--O1}"
 # Include order is load-bearing, and getting it wrong cost most of a debugging
 # session.  AMIX's own <stdarg.h> defines va_start as
 #     list = (void *)((char *)&lastarg + sizeof(lastarg))
