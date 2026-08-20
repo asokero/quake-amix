@@ -15,4 +15,4 @@ config.local.sh
 emu/kernel/
 
 # GCC 14 experiment objects
-obj-gcc14/
+obj-gcc14*/

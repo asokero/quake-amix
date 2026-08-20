@@ -27,6 +27,8 @@ Amiberry on the 68040 kernel (`68040-260812-06`).
       on hardware, first try
 - [x] `timedemo` numbers: **7.5 fps** CPU-only, **6.9 fps** through the VA2000 on
       Zorro III, at 320×200 — see `docs/BENCHMARKS.md`
+- [x] **9.2 fps** built with GCC 14 instead of GCC 2.7.2.3 — same source, identical
+      frames, 22.6% faster (`tools/build-gcc14.sh`, `docs/NEWER-COMPILER.md`)
 - [ ] Playable: keyboard is written but untried; no mouse, no sound
 
 Deferred on purpose: sound, networking (`src/net_amix.c` explains), other RTG

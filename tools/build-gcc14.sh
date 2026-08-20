@@ -24,8 +24,8 @@ CRT="$SYSROOT/usr/ccs/lib"
 # The static libc lives only in a real AMIX tree; the cross sysroot ships the
 # shared one.  Override with AMIX_LIBC_A if yours is elsewhere.
 LIBCA="${AMIX_LIBC_A:-$HOME/kehitys/amix-playground/vanillarw/usr/ccs/lib/libc.a}"
-OUT=build/quake-gcc14
-OBJ=obj-gcc14
+OUT="${OUT:-build/quake-gcc14}"
+OBJ="${OBJ:-obj-gcc14}"
 
 test -x "$(command -v $CC)"  || { echo "ERROR: $CC not found (apt install gcc-m68k-linux-gnu)"; exit 1; }
 test -f "$CRT/crt1.o"        || { echo "ERROR: AMIX crt objects missing: $CRT"; exit 1; }
@@ -41,9 +41,31 @@ test -f "$LIBCA"             || { echo "ERROR: static libc.a missing: $LIBCA"; e
 #              through a vec3_t[162].  Both work and both are undefined
 #              behaviour, and gcc 14 reports having detected it, which means -O2
 #              is entitled to act on it.  gcc 2.7.2.3 never looked.
-CFLAGS="-O2 -m68060 -std=gnu89 -fcommon -ffreestanding -fno-strict-aliasing -fno-PIC \
-        -fno-aggressive-loop-optimizations \
-        -DAMIX -Isrc -isystem $SYSROOT/usr/include"
+OPT="${OPT:--O2}"
+# Include order is load-bearing, and getting it wrong cost most of a debugging
+# session.  AMIX's own <stdarg.h> defines va_start as
+#     list = (void *)((char *)&lastarg + sizeof(lastarg))
+# which assumes the last named parameter is spilled to its stack home with the
+# varargs directly after it.  That held for the 1992 compiler.  gcc 14 keeps it
+# in a register, so the macro produces a garbage pointer -- which is precisely
+# why modern compilers require __builtin_va_start.  Quake builds every line it
+# prints with vsprintf, so the symptom was a program that ran, printed nothing
+# at -O0, and crashed inside strlen at -O2.
+#
+# So: -nostdinc, then gcc's own headers FIRST (stdarg.h, stddef.h) and AMIX's
+# after.  -nostdinc also keeps the host's glibc headers out entirely, which
+# would otherwise be searched and are wrong for this target in every respect.
+GCCINC="$($CC -print-file-name=include)"
+# -malign-int is not a tuning flag, it is THE ABI flag.  gcc defaults to 2-byte
+# alignment for int and pointer members on m68k; AMIX's compiler used 4.  Every
+# struct shared with libc is laid out differently without it -- FILE comes out
+# 14 bytes instead of 16, so stdout, which is &__iob[1], points into the middle
+# of the first entry and every stdio call writes to a zeroed struct.  The
+# symptom is a program that runs correctly and prints absolutely nothing.
+CFLAGS="$OPT -m68060 -malign-int -std=gnu89 -fcommon -ffreestanding -fno-strict-aliasing -fno-PIC \
+        -fno-aggressive-loop-optimizations -nostdinc \
+        -isystem $GCCINC -isystem $SYSROOT/usr/include \
+        -DAMIX $EXTRA_DEFINES -Isrc"
 
 CORE="chase cl_demo cl_input cl_main cl_parse cl_tent cmd common console crc cvar \
 d_edge d_fill d_init d_modech d_part d_polyse d_scan d_sky d_sprite d_surf d_vars \

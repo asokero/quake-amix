@@ -17,6 +17,7 @@ identical apart from the flag named; both render the same frames.
 | `quake-va2000` | 68040 | 260813-01 | Zorro II | 165.8 | 5.8 | display via a 32-bit copy |
 | `quake-null` | 68040 | 260819-13 | — | **129.9** | **7.5** | newer kernel, 5.5% faster on CPU alone |
 | `quake-va2000` | 68040 | 260819-13 | **Zorro III** | **141.0** | **6.9** | |
+| `quake-null`, **gcc 14.2.0** | 68060 | 260819-13 | — | **105.9** | **9.2** | same source, **22.6% faster** |
 
 `quake-null` renders into a malloc'd buffer and displays nothing, so its number
 is the CPU alone. Subtracting it gives what the board costs:
@@ -26,6 +27,36 @@ is the CPU alone. Subtracting it gives what the board costs:
 | rasterisation | 141 ms | |
 | Zorro II copy, byte-wise | 62 ms | 1.0 MB/s |
 | Zorro II copy, 32-bit | **29.6 ms** | **2.2 MB/s** |
+
+### The compiler was worth 22.6%, and it renders identically
+
+The leading suspect for the gap against the AmigaOS port was the compiler: this project used GCC
+**2.7.2.3** (1995) against the AmigaOS port's GCC 6.5. Measured, same source, same machine, same
+demo, clean machine both times:
+
+| | Seconds | fps |
+|---|--:|--:|
+| gcc 2.7.2.3, `-O -m68040` | 129.9 | 7.5 |
+| **gcc 14.2.0, `-O2 -m68060`** | **105.9** | **9.2** |
+
+**24 seconds off a 130-second run, from the compiler alone.** Rasterisation is 92% of a frame, so
+this is very nearly all of it.
+
+And it draws the same picture. Frame 800 of `demo1`, dumped from both builds and compared on the
+machine:
+
+```
+VIDSUM frame 800 = f255bf50     gcc 2.7.2.3
+VIDSUM frame 800 = f255bf50     gcc 14.2.0
+cmp fr-gcc27.raw fr-gcc14.raw   ->  identical, 64000 bytes
+```
+
+`tools/build-gcc14.sh` builds it; `docs/NEWER-COMPILER.md` documents the four ABI and format
+obstacles that had to be cleared first, one of which — `-malign-int` — is the difference between a
+working program and one that runs correctly and prints absolutely nothing.
+
+Extrapolating to the display build, 105.9 s of CPU plus the measured 11.1 s of Zorro III copy would
+be about **8.3 fps** through the VA2000, against 6.9 today. Not measured yet.
 
 ### Zorro III: measured, and it paid
 

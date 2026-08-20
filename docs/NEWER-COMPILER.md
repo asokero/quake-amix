@@ -1,12 +1,17 @@
 # A newer compiler for AMIX
 
-Status: **not finished, and further along than expected.** The whole project compiles and links
-with GCC 14.2.0. What it does not yet do is start: AMIX's 1992 dynamic linker rejects the binary.
+**It works, and it is worth 22.6%.** Quake built with GCC 14.2.0 runs on AMIX and completes
+`timedemo demo1` in 105.9 s against 129.9 s for the same source under GCC 2.7.2.3 — and renders
+frame 800 byte-for-byte identically. `tools/build-gcc14.sh` builds it.
 
-This matters because the compiler is the leading unmeasured suspect for the gap against the
-AmigaOS port. The current toolchain is GCC **2.7.2.3** (1995); the AmigaOS port uses GCC 6.5
-(2018). Rasterisation is 92% of a frame here, and the two obvious ways to attack it — hand-written
-assembly and `-O2` — were both measured and both lost. A compiler is what is left.
+That confirms what was the leading unmeasured suspect for the gap against the AmigaOS port. The
+current toolchain is GCC 2.7.2.3 (1995); the AmigaOS port uses GCC 6.5 (2018). Rasterisation is
+92% of a frame here, and both other ways to attack it — hand-written assembly and `-O2` — had
+already been measured and lost.
+
+Four obstacles had to be cleared, and every one of them presented as something other than what it
+was. They are documented below in the order they were hit, because the *symptoms* are the useful
+part for anyone doing this again.
 
 ## The compiler was already installed
 
@@ -52,21 +57,67 @@ undefined list, which confirms AMIX's headers were the ones used.
 
 **It links** against AMIX's `crt1.o`, `libc.so.1` and `libm.a`.
 
-## What does not work yet
+## The four obstacles
 
-The binary segfaults before `main`, with the PC inside the dynamic linker (`0xC10xxxxx`), not in
-program text (`0x80xxxxxx`). Two format differences were found and fixed; at least one remains.
+### 1. `DT_GNU_HASH` — crash inside the dynamic linker
 
-| Difference | Fix | Result |
-|---|---|---|
-| Only `DT_GNU_HASH`; AMIX's loader knows only `DT_HASH` | `--hash-style=sysv` | crash moved to a different address in the loader |
-| Extra `PT_GNU_RELRO` segment | `-z norelro` | still crashes |
-| Extra `PT_GNU_STACK` segment | `-z nognustack` is *ignored* by this ld | untried — patch `p_type` to `PT_NULL` |
+A dynamically linked binary segfaulted before `main`, with the PC at `0xC10xxxxx`: inside AMIX's
+1992 `ld.so`, not in program text. The binary carried only `DT_GNU_HASH`; that loader knows only
+`DT_HASH`. `--hash-style=sysv` moved the crash to a different address in the loader rather than
+removing it, and `-z norelro` did not finish the job either.
 
-Dynamic tags and relocation types (`R_68K_COPY`, `R_68K_JMP_SLOT`) otherwise match the working
-binary exactly.
+**Static linking removes the loader from the problem instead of negotiating with it**, and is what
+the build script does. `PT_GNU_STACK` is patched to `PT_NULL` afterwards, since `ld -z nognustack`
+is silently ignored by this binutils and a 1992 loader has no reason to know the type.
 
-## Two real bugs the old compiler never mentioned
+One obstacle static linking has of its own: `_lib_version`, referenced by libm's `atan2` and
+`pow`, exists only in the *dynamic* `libc.so.1` and never in `libc.a`. It is SVR4 libm's
+conformance-mode variable; the build script defines it.
+
+### 2. `va_start` — a program that ran and printed nothing
+
+With the loader out of the way, Quake started, initialised completely, reached its main loop —
+and printed not one character, while raw `write(2, ...)` worked fine.
+
+AMIX's own `<stdarg.h>` defines:
+
+```c
+typedef void *va_list;
+#define va_start(list, name) (list = (void *)((char *)&name + sizeof(name)))
+```
+
+That takes the address of the last named parameter and assumes the varargs follow it in the stack
+frame. True for the 1992 compiler, which spilled every parameter to its stack home. GCC 14 keeps
+it in a register — which is exactly why modern compilers require `__builtin_va_start`. Quake
+builds every line it prints with `vsprintf`, so the result was silence at `-O0` and a crash inside
+`strlen` at `-O2`.
+
+Fix: `-nostdinc`, then **gcc's own header directory first** and AMIX's after, so `stdarg.h` and
+`stddef.h` come from gcc and everything else from AMIX. `-nostdinc` also keeps the host's glibc
+headers out, which would otherwise be searched and are wrong for this target in every respect.
+
+### 3. `-malign-int` — the one that matters most
+
+Even with varargs fixed, `putc` and `fputc` still wrote nothing. The FILE struct read back as all
+zeros:
+
+```
+sizeof(FILE)=14   offset _cnt=0  _ptr=4  _base=8
+stdout->_file=0   stdout->_flag=0        <- should be 1 and non-zero
+```
+
+`__iob` is in libc's `.data` and is **320 bytes**. 320/16 = 20 entries exactly; 320/14 is not an
+integer. AMIX's libc lays FILE out as 16 bytes; gcc 14 was laying it out as 14, because **gcc
+defaults to 2-byte alignment for `int` and pointer members on m68k while AMIX's compiler used 4**.
+So `stdout`, which is `&__iob[1]`, pointed two bytes into the first entry.
+
+`-malign-int` is therefore not a tuning flag but *the* ABI flag. Without it every struct shared
+with libc is laid out differently — `FILE`, `stat`, `timeval`, all of them — and the failure is
+silent.
+
+### 4. Two real bugs in id's source
+
+
 
 gcc 14 diagnoses things gcc 2.7.2.3 cannot, and two of them are in **id's original source**, not
 in anything this port added:
@@ -91,34 +142,28 @@ for this codebase, it will also be entitled to assume things about it that the 1
 assumed. Any mysterious rendering fault under gcc 14 should be checked against its warning output
 before being blamed on the port.
 
-## Where to resume
+## What is left
 
-**Static linking works.** `tools/build-gcc14.sh` produces `build/quake-gcc14`, statically linked,
-no undefined symbols, `PT_GNU_STACK` neutralised to `PT_NULL` so a 1992 loader has nothing
-unfamiliar to interpret. It has never been run.
+* **Measure the VA2000 build.** Only `VIDEO=null` has been timed under gcc 14. CPU 105.9 s plus
+  the measured 11.1 s of Zorro III frame copy extrapolates to about 8.3 fps against 6.9 today, but
+  that is arithmetic, not a measurement.
+* **Decide whether this becomes a supported path.** `make` is still the supported build and still
+  uses gcc 2.7.2.3. Making the modern compiler the default means, at minimum: validating more than
+  one program, deciding static versus dynamic, and packaging the flags so nobody has to know them.
+* **It cannot replace gcc 2.7.2.3 for the kernel.** `gcc-cross-amix` also builds kernel and driver
+  objects, which need `-traditional` — removed from gcc long ago — and must satisfy AMIX's own
+  linker. Two toolchains, one for each job, is the shape of this.
+* Whether a gcc configured for `m68k-cbm-sysv4` proper is even possible is unknown; the m68k SVR4
+  targets appear to have been dropped from gcc long ago, which would mean writing a target config.
+  None of that was needed here: Debian's stock `m68k-linux-gnu` compiler pointed at AMIX's headers
+  and libraries is enough.
 
-The remaining step is one `timedemo demo1` on the machine, against the **129.9 s / 7.5 fps**
-recorded in `BENCHMARKS.md` for the same source under gcc 2.7.2.3. Compare a dumped frame first.
+## Why it is worth having even apart from the speed
 
-The dynamic-linking path, if anyone wants it: It removes the dynamic linker from the problem entirely
-rather than negotiating with it. it still segfaults inside `ld.so` after
-`--hash-style=sysv` and `-z norelro`, at a different address than before those. `PT_GNU_STACK`
-remains the untried suspect there.
-
-The one obstacle static linking did have is solved: `_lib_version`, referenced by libm's `atan2`
-and `pow`, exists only in the *dynamic* `libc.so.1` and never in `libc.a`. It is SVR4 libm's
-conformance-mode variable and the build script defines it.
-
-## What it might be worth, and what to watch
-
-Unknown, and static instruction counts do not predict it — GCC 14 emitted *more* instructions for
-`D_DrawSpans8` (295 vs 245), which says nothing, since it unrolls and schedules where 2.7.2.3 does
-neither. Only a run on hardware settles it.
-
-Two things to check if it does run, before believing any number:
-
-* **The frame comparison.** `-DVID_CHECKSUM -DVID_DUMP_FRAME=800` and a byte comparison against a
-  known-good frame. A new compiler is exactly the circumstance where output could change.
-* Whether the four assembler mismatches in `docs/TOOLCHAIN.md` are simply gone. They are artefacts
-  of gcc 2.7.2.3 against gas 2.8.1; a self-consistent modern toolchain should not have them, which
-  would make the wrapper's fix_asm unnecessary for this path.
+* **The four assembler mismatches in `docs/TOOLCHAIN.md` simply do not exist on this path.**
+  `.swbeg`, `tdivs.l`, reversed `fcmp` and the `fsgl*` suffixes are all artefacts of gcc 2.7.2.3
+  disagreeing with gas 2.8.1. A self-consistent modern toolchain has none of them, and three of
+  those four were silent.
+* **Diagnostics.** It found two genuine undefined-behaviour sites in id's own source that the 1995
+  compiler cannot see.
+* `-m68060` exists, which gcc 2.7.2.3 does not support at all.
