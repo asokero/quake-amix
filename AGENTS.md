@@ -19,6 +19,8 @@ implies.
 3. `docs/EMULATOR.md` before touching the emulator, `docs/HARDWARE.md` before touching the real
    machine.
 4. `README.md` for current state.
+5. `docs/OTHER-PORTS.md` if the task is about applying any of this to wolf3d, doom or xrtg. It
+   says where to look first and, more usefully, which of the three wins here does *not* transfer.
 
 If a document disagrees with the code, the code is right and the document needs fixing. Say so
 rather than working around it.

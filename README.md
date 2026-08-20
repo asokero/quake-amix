@@ -70,6 +70,16 @@ complaint:
 The fixes live in `gcc-cross-amix`'s `amix-gcc-wrapper.sh`; the analysis, with
 the worked example that exposed each one, is in that document.
 
+## Documentation
+
+| | |
+|---|---|
+| `docs/TOOLCHAIN.md` | four ways gcc 2.7.2.3 and gas 2.8.1 disagree, three of them silent |
+| `docs/NEWER-COMPILER.md` | building with gcc 14 instead, and the four obstacles in the way |
+| `docs/BENCHMARKS.md` | every measured number, and two ways this project measured wrong |
+| `docs/EMULATOR.md`, `docs/HARDWARE.md` | how to run it in each place |
+| `docs/OTHER-PORTS.md` | what would and would not transfer to wolf3d, doom, xrtg |
+
 ## Provenance and license
 
 GPL v2, as the original Quake source.
