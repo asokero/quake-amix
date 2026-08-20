@@ -25,7 +25,8 @@ Amiberry on the 68040 kernel (`68040-260812-06`).
 - [x] Runs on real hardware — Amiga 3000 + 68060, kernel `68060-260813-01`
 - [x] VA2000 video backend: **the game renders correctly on the board**, confirmed
       on hardware, first try
-- [x] `timedemo` numbers: **7.1 fps** at 320×200, CPU only — see `docs/BENCHMARKS.md`
+- [x] `timedemo` numbers: **7.5 fps** CPU-only, **6.9 fps** through the VA2000 on
+      Zorro III, at 320×200 — see `docs/BENCHMARKS.md`
 - [ ] Playable: keyboard is written but untried; no mouse, no sound
 
 Deferred on purpose: sound, networking (`src/net_amix.c` explains), other RTG

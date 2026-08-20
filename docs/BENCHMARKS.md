@@ -9,12 +9,14 @@ fps is derived.
 Amiga 3000 + 68060, AMIX kernel `68060-260813-01`, node `solon`. Builds are
 identical apart from the flag named; both render the same frames.
 
-| Build | `ARCH` | Seconds | fps | |
-|---|---|--:|--:|---|
-| `quake-null` | 68020 | 495.5 | 2.0 | FSGLMUL/FSGLDIV, emulated by the FPSP |
-| `quake-null` | 68040 | **137.1** | **7.1** | FSMUL/FSDIV, hardware — **3.6× faster** |
-| `quake-va2000` | 68040 | 197.3 | 4.9 | display via libc `memcpy` |
-| `quake-va2000` | 68040 | **165.8** | **5.8** | display via a 32-bit copy |
+| Build | `ARCH` | Kernel | Bus | Seconds | fps | |
+|---|---|---|---|--:|--:|---|
+| `quake-null` | 68020 | 260813-01 | — | 495.5 | 2.0 | FSGLMUL/FSGLDIV, emulated by the FPSP |
+| `quake-null` | 68040 | 260813-01 | — | 137.1 | 7.1 | FSMUL/FSDIV, hardware — **3.6× faster** |
+| `quake-va2000` | 68040 | 260813-01 | Zorro II | 197.3 | 4.9 | display via libc `memcpy` |
+| `quake-va2000` | 68040 | 260813-01 | Zorro II | 165.8 | 5.8 | display via a 32-bit copy |
+| `quake-null` | 68040 | 260819-13 | — | **129.9** | **7.5** | newer kernel, 5.5% faster on CPU alone |
+| `quake-va2000` | 68040 | 260819-13 | **Zorro III** | **141.0** | **6.9** | |
 
 `quake-null` renders into a malloc'd buffer and displays nothing, so its number
 is the CPU alone. Subtracting it gives what the board costs:
@@ -24,6 +26,41 @@ is the CPU alone. Subtracting it gives what the board costs:
 | rasterisation | 141 ms | |
 | Zorro II copy, byte-wise | 62 ms | 1.0 MB/s |
 | Zorro II copy, 32-bit | **29.6 ms** | **2.2 MB/s** |
+
+### Zorro III: measured, and it paid
+
+The VA2000 is a Zorro II **and** a Zorro III card depending on firmware. Once it was switched to
+Zorro III mode and the kernel gained support for it, the frame copy was measured again. The
+kernel changed at the same time, so the CPU-only baseline was re-measured too — without that,
+the kernel's own improvement would have been credited to the bus.
+
+| | display per frame | effective |
+|---|--:|--:|
+| Zorro II, 32-bit copy | 29.6 ms | 2.16 MB/s |
+| **Zorro III, same copy** | **11.5 ms** | **5.59 MB/s** |
+
+**2.6× on the copy**, slightly better than the 2× the kernel project's busbench predicted. Total
+24.8 s off the run, which decomposes as:
+
+| | |
+|---|--:|
+| the bus | 17.6 s (71%) |
+| the newer kernel's faster CPU rendering | 7.2 s (29%) |
+
+Isolating the bus: with the new kernel, Zorro II would have run 158.6 s = 6.1 fps, so **Zorro III
+alone is worth +0.8 fps, 13%**. The display is now **7.9% of the frame**, down from 17.3%.
+
+The prediction made before this measurement was 6.9 fps, and the measurement is 6.9 fps — but for
+the wrong reasons, and the agreement is a coincidence of two cancelling errors. It assumed the copy
+would reach ~15 MB/s (it reached 5.6) and that CPU time would stay at 141 ms (it fell to 130).
+Worth remembering before trusting the next extrapolation from a bus figure.
+
+### The bottleneck is now unambiguously the rasteriser
+
+129.9 ms of a 141.0 ms frame — **92%** — is CPU. Everything remaining on the display side is
+capped at +0.6 fps, and the two obvious rasteriser levers have already been tried and lost:
+hand-written assembly was slower than the compiler, and -O2 was slower than -O. The next
+improvement will have to be algorithmic, or come from a newer compiler.
 
 ### The frame copy was paying four times over
 
@@ -41,32 +78,19 @@ row above: **+0.9 fps for a copy loop**, no kernel involvement.
 2.2 MB/s is around 60% of Zorro II's practical ceiling on an A3000 (~3.5 MB/s),
 so some room remains — burst access, or moving the copy off the CPU.
 
-### What Zorro III would be worth here
+### The prediction this replaced
 
-The display is now 17% of the frame, down from 30%. Extrapolating from the
-measured copy rate:
+Before the card was switched, the estimate here was that Zorro III would be worth about +1.1 fps,
+taking the display from 17% of the frame to roughly 3%. The measurement above says +1.1 fps
+against the same starting point — and 7.9%, not 3%.
 
-| | copy | frame | fps | vs today |
-|---|--:|--:|--:|--:|
-| **today**, 32-bit copy over Zorro II | 29.6 ms | 170 ms | **5.8** | — |
-| a perfect Zorro II copy (3.5 MB/s) | 18 ms | 159 ms | 6.3 | +0.5 |
-| Zorro III (~15 MB/s) | 4 ms | 145 ms | 6.9 | **+1.1** |
+It is kept as a note because the arithmetic behind it was wrong in two places that happened to
+cancel: it assumed the copy would reach ~15 MB/s (5.6) and that CPU time would stay put (it fell
+7.2 s under a newer kernel). Extrapolating a frame rate from a bus bandwidth figure is worth less
+than it looks.
 
-**The VA2000 is both a Zorro II and a Zorro III card, depending on firmware.**
-It runs in Zorro II mode here only because AMIX has no Zorro III support yet, so
-kernel Zorro III work would apply to this board directly — roughly +1.1 fps, or
-19%, on this benchmark.
-
-What it cannot do is more than that: rasterisation is 141 ms of a 170 ms frame,
-and no bus improvement touches it. Zorro III takes the display's share from 17%
-to about 3%, which is close to the whole of what is available on that side. The
-larger remaining win for this game is the rasteriser — and the AmigaOS port's
-hand-written `d_scan_68k.s` already exists, in vasm syntax, for whoever converts
-it to GNU as.
-
-The proportions hold at higher resolutions, since Quake's rasterisation scales
-with pixel count much as the copy does; the absolute milliseconds grow on both
-sides.
+The proportions do hold at higher resolutions, since Quake's rasterisation scales with pixel count
+much as the copy does; the absolute milliseconds grow on both sides.
 
 ### Why the flag is worth 3.6×
 
