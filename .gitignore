@@ -13,3 +13,6 @@ config.local.sh
 
 # Emulator kernel copies (large binaries belonging to the kernel project)
 emu/kernel/
+
+# GCC 14 experiment objects
+obj-gcc14/
