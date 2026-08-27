@@ -30,7 +30,7 @@ is the CPU alone. Subtracting it gives what the board costs:
 | Zorro II copy, byte-wise | 62 ms | 1.0 MB/s |
 | Zorro II copy, 32-bit | **29.6 ms** | **2.2 MB/s** |
 
-### The compiler was worth 22.6%, and it renders identically
+### The compiler was worth 16.3% usable, 22.6% if it worked
 
 The leading suspect for the gap against the AmigaOS port was the compiler: this project used GCC
 **2.7.2.3** (1995) against the AmigaOS port's GCC 6.5. Measured, same source, same machine, same
@@ -39,7 +39,8 @@ demo, clean machine both times:
 | | Seconds | fps |
 |---|--:|--:|
 | gcc 2.7.2.3, `-O -m68040` | 129.9 | 7.5 |
-| **gcc 14.2.0, `-O2 -m68060`** | **105.9** | **9.2** |
+| gcc 14.2.0, `-O2 -m68060` | 105.9 | 9.2 | *(renders correctly, crashes on map load)* |
+| **gcc 14.2.0, `-O1 -m68060`** | **111.7** | **8.7** | *(the usable one)* |
 
 **24 seconds off a 130-second run, from the compiler alone.** Rasterisation is 92% of a frame, so
 this is very nearly all of it.
