@@ -82,18 +82,33 @@ the worked example that exposed each one, is in that document.
 
 ## Provenance and license
 
-GPL v2, as the original Quake source.
+**GPL v2** — the full text is in [`LICENSE`](LICENSE).
 
-Seeded from the GCC/m68k-amigaos port of NovaCoder's AmiQuake
-(`github.com/terriblefire/amiquake`) rather than from pristine id source,
-to inherit its portable 68k optimizations — the Quake III `InvSqrt`, a fast
-reciprocal in the span drawer, per-frame turbulence caching. The AmigaOS
-backends were removed; the Unix platform files are id's own, recovered from that
-repository's history.
+This is not a choice, and it is worth stating because the sibling AMIX projects
+(`va2000-amix`, `xrtg-amix`, `zz9000-amix`) are MIT. This repository contains id
+Software's Quake engine, which id released under the GPL v2 in 1999. Everything
+that links against it inherits that, including the AMIX platform layer written
+for this port — `vid_va2000.c`, `in_amix.c`, `sys_amix.c`, `net_amix.c`. Every
+source file carries the header.
 
-The VA2000 and termios layers follow the wolf3d-amix port, whose hardware
-findings were established on the real machine. Copies of both are kept in
-`docs/reference/`.
+The chain of provenance, since it is three deep:
 
-Requires Quake game data (`id1/pak0.pak`), which is not distributable and is not
-included here.
+| Layer | Origin | |
+|---|---|---|
+| Engine | id Software, Quake 1996–97 | GPL v2 since 1999 |
+| 68k optimizations | NovaCoder's AmiQuake, via the GCC/m68k-amigaos port at `github.com/terriblefire/amiquake` | GPL v2 |
+| AMIX layer | this repository | GPL v2 |
+
+Seeding from the AmigaOS port rather than from pristine id source was deliberate:
+it inherits the portable 68k work — the Quake III `InvSqrt`, a fast reciprocal in
+the span drawer, per-frame turbulence caching. The AmigaOS backends were removed;
+the Unix platform files are id's own, recovered from that repository's history.
+`src/d_scan_amix.s` descends from assembly NovaCoder wrote and the AmigaOS port
+disassembled back into readable source, and stays readable source here for the
+same reason.
+
+The VA2000 and termios layers follow the wolf3d-amix port, whose hardware findings
+were established on the real machine. Copies of both are kept in `docs/reference/`.
+
+**Game data is not included and is not distributable.** Quake needs
+`id1/pak0.pak`; the shareware pak is enough to run everything documented here.
