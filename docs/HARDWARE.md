@@ -1,53 +1,57 @@
 # Running on the real machine
 
-Nothing in this file has been executed on hardware yet. It is written from what
-the code does and from what the va2000-amix and wolf3d-amix ports established;
-treat every step as a claim to be checked, and the "if it goes wrong" section as
-the part most likely to be needed.
+Every step here has been run on real hardware: an Amiga 3000 with a 68060
+accelerator, AMIX 2.1p2a, the 68040/68060 kernel port, and an MNT VA2000. The
+game renders, benchmarks and plays on that machine.
 
-Target: Amiga 3000 with a 68040 or 68060 card, the AMIX 68040/68060 kernel port,
-and an MNT VA2000. Machine is `10.0.10.10`, logged in as root; ask the user
-for the password rather than keeping it in this repository.
+**One machine, though.** Nothing here has been tried on an Amiga 4000, on a
+68040, on a 68030, or against a different VA2000 firmware revision. Where a step
+is inference rather than experience it says so.
+
+This file assumes you reach the machine over the network as root. Nothing in
+this repository stores the address or the password: set `AMIX_HOST` for the
+tooling, and pass the password through `AMIX_PASS` at the point of use.
 
 ## What to copy
 
 | From | To on AMIX | Notes |
 |---|---|---|
-| `build/quake-va2000` | `/quake/quake` | the game, needs the VA2000 |
-| `build/quake-null` | `/quake/quake-bench` | renders to memory, displays nothing |
+| `build/quake-va2000-68040` | `/quake/quake` | the game, needs the VA2000 |
+| `build/quake-null-68040` | `/quake/quake-bench` | renders to memory, displays nothing |
 | `id1/pak0.pak` | `/quake/id1/pak0.pak` | 18.7 MB, shareware pak is enough |
 
-Over the NAS, which is the easy path on the real machine — none of the emulator's
-tftp gymnastics apply:
+Any shared filesystem the machine can already see is the easy path — an NFS
+export or a mounted SMB share. None of the emulator's tftp gymnastics apply on
+real hardware, and in particular the 16 MB transfer limit does not, so `pak0.pak`
+goes across in one piece.
 
 ```sh
-# Linux
-cp build/quake-va2000 build/quake-null \
-   "/run/user/12044/gvfs/smb-share:server=nasu.local,share=public/va2000dev/quake/"
-
-# AMIX
+# On the AMIX machine, with the build staged somewhere it can read:
 mkdir -p /quake/id1
-cp /mnt/nasu/va2000dev/quake/quake-va2000 /quake/quake
-cp /mnt/nasu/va2000dev/quake/quake-null   /quake/quake-bench
-cp /mnt/nasu/va2000dev/quake/pak0.pak     /quake/id1/
+cp $STAGING/quake-va2000-68040 /quake/quake
+cp $STAGING/quake-null-68040   /quake/quake-bench
+cp $STAGING/pak0.pak           /quake/id1/
 chmod +x /quake/quake /quake/quake-bench
 ```
+
+**Put game data under `/`, not `/tmp`** — AMIX clears `/tmp` on every boot.
 
 ## Prerequisites
 
 - **Run as root.** `/dev/va2000` and the framebuffer mmap need it.
 - The va2000 driver must be installed and `/dev/va2000` must exist
-  (`mknod /dev/va2000 c 68 0`). See `~/kehitys/va2000-amix`.
-- The binary is 68020 + 68881 code, so it runs on 030, 040 and 060 alike. On
-  040/060 it needs the kernel's FPSP, which the port has.
+  (`mknod /dev/va2000 c 68 0`). See the `va2000-amix` project.
+- The default build is `-m68040`, so it needs a 68040 or 68060. Build
+  `ARCH=68020` for a 68030 — it runs on 040/060 too, at roughly a third of the
+  speed there, because the 68060 emulates the FSGLMUL/FSGLDIV it emits.
 - Quake wants an 8 MB heap by default. `-mem 8` sets it explicitly; the emulated
   machine had ~30 MB free, real hardware should be comfortable.
 
 ## The measurement first
 
 Do this one before anything with a picture. It renders into a malloc'd buffer
-and displays nothing, so it measures the CPU alone with no Zorro II blit in the
-number — which is exactly what tells us what the port and the kernel are worth:
+and displays nothing, so it measures the CPU alone with no framebuffer copy in
+the number — which is exactly what tells us what the port and the kernel are worth:
 
 ```sh
 cd /quake
@@ -134,11 +138,24 @@ far were silent miscompilations that presented as application logic errors, and
 shakedown. Before reading the C, check what came out of the assembler —
 `docs/TOOLCHAIN.md` §1 has the greps.
 
-## Worth writing down
+## What the first runs settled
 
-- both fps numbers, and which CPU and kernel build produced them
-- whatever `in_keyhold` value ends up feeling right
-- whether the aspect ratio looks right; `vid.aspect` is currently id's 320×200
-  expression and the board's 2× scaling into a 640×480 frame may not match it
-- anything printed to the terminal before a failure — stdout is unbuffered here,
-  so the last line before a crash is the real last line
+- The picture is correct on the board, first try, and stayed correct across the
+  Zorro II → Zorro III change.
+- The numbers are in `docs/BENCHMARKS.md`, each one tagged with the CPU, the
+  kernel build and the bus it came from. Report those three with any new figure
+  or it cannot be compared against anything.
+- Keyboard response is usable but not good. `in_keyhold` has not been tuned to a
+  value anyone is happy with — if you find one, put it in the benchmarks doc.
+
+Still open, and worth recording if you get to it:
+
+- whether the aspect ratio is exactly right; `vid.aspect` is id's 320×200
+  expression and the board scales 2× into a 640×480 frame
+- the `ARCH=68020` build on actual 68030 silicon — it is shipped and has never
+  been measured there
+- the GCC 14 `-O1` build through the VA2000, which is the one gap in the
+  benchmark table
+
+Whatever fails, note **what was printed last**: stdout is unbuffered here, so the
+final line before a crash really is the final line.

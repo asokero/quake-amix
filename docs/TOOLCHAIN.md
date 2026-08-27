@@ -5,7 +5,7 @@ Some of it is a fix to the toolchain itself, not to Quake, and belongs upstream
 in `gcc-cross-amix`; those items say so.
 
 The toolchain is `m68k-cbm-sysv4-gcc` — GCC **2.7.2.3** with binutils **2.8.1**,
-from `~/kehitys/amix-playground/gcc-cross-amix`, installed in `~/opt/amix-cross`.
+built by the **gcc-cross-amix** project and installed here in `~/opt/amix-cross`.
 
 ```sh
 export PATH=$HOME/opt/amix-cross/bin:$PATH
@@ -178,11 +178,13 @@ builds the compatible one, at the cost above.
 
 The `gcc-cross-amix` sysroot ships `libc.so.1` and the crt objects. That is
 enough for `hello.c` and not enough for anything using floating point. Copy
-from a real AMIX tree (here: `~/kehitys/amix-playground/vanillarw`):
+from a real AMIX installation — an unpacked distribution tree, or the files
+copied off a running machine:
 
 ```sh
 SYSROOT=$HOME/opt/amix-cross/m68k-cbm-sysv4/sysroot
-cp vanillarw/usr/ccs/lib/libm.a $SYSROOT/usr/lib/
+AMIXTREE=/path/to/amix            # a real AMIX root
+cp $AMIXTREE/usr/ccs/lib/libm.a $SYSROOT/usr/lib/
 ```
 
 **These belong in the `sysroot` target upstream.**

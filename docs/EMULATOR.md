@@ -4,9 +4,11 @@ Amiberry has no VA2000 emulation, so the emulator can run the `VIDEO=null`
 build only — the dedicated server and the pure-rasterisation benchmark. That is
 exactly milestone 1. Anything with a picture has to go to real hardware.
 
-The emulator harness belongs to the kernel port, in
-`~/kehitys/amix-playground/kernelsupport`. Its `test-tools/README.md` is the
-authority; what follows is the Quake-specific path through it.
+The emulator harness is not part of this repository — it belongs to the AMIX
+68040/68060 **kernel port** project, and this file assumes that checkout sits
+beside this one. `$KERNELSUPPORT` below stands for it, and its
+`test-tools/README.md` is the authority; what follows is only the Quake-specific
+path through it.
 
 ## Boot
 
@@ -18,6 +20,9 @@ sh tools/emu-quake.sh              # boot from the golden image (guest is wiped)
 sh tools/emu-quake.sh keep         # boot the existing disk, contents intact
 sh tools/emu-quake.sh snapshot     # make the current disk the new golden
 ```
+
+The script's paths default to one working setup; `AMIBERRY_HD`, `AMIBERRY_CONF`
+and `AMIBERRY_BIN` override them without editing it.
 
 Do **not** use the kernel project's `emu-reset-boot.sh` here. It stages
 whatever sits in `kernelsupport/build/unix-040-dbg` and restores that project's
@@ -70,10 +75,11 @@ dump in the serial log — see `test-tools/README.md`.
 
 `xdotool` does not work: Amiberry is an SDL application and ignores
 `XSendEvent`, and XTEST keystrokes are unreliable against it. Use the kernel
-project's IPC helper, which talks to `/run/user/12044/amiberry.sock`:
+project's IPC helper, which talks to Amiberry's socket under
+`$XDG_RUNTIME_DIR/amiberry.sock`:
 
 ```sh
-python3 test-tools/sendkeys.py 'root' RET
+python3 $KERNELSUPPORT/test-tools/sendkeys.py 'root' RET
 ```
 
 **The guest console keymap is German.** `sendkeys.py` translates for it; typing
@@ -114,7 +120,7 @@ stock one stalls because slirp drops replies from an ephemeral port):
 
 ```sh
 # host
-python3 test-tools/tftp_onesock.py /tmp/quake-tftp     # serves UDP 1069
+python3 $KERNELSUPPORT/test-tools/tftp_onesock.py /tmp/quake-tftp   # serves UDP 1069
 ```
 
 ```sh

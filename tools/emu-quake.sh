@@ -28,11 +28,18 @@
 
 set -e
 
-HD="$HOME/Asiakirjat/FS-UAE/Hard Drives"
+# Paths.  The defaults are one working setup; override any of them in the
+# environment rather than editing this file -- the hard-drive directory in
+# particular follows the locale's "Documents" name and will not match yours.
+#
+#   AMIBERRY_HD    directory holding the .hdf images
+#   AMIBERRY_CONF  the .uae configuration for this project's guest
+#   AMIBERRY_BIN   the amiberry executable
+HD="${AMIBERRY_HD:-$HOME/Asiakirjat/FS-UAE/Hard Drives}"
 GOLDEN="$HD/amix_hardfileX11R5-quake-golden.hdf"
 DISK="$HD/amix_hardfileX11R5-quake.hdf"
-CONF="$HOME/Amiberry/Configurations/a3000ux060-amixquake.uae"
-AMIBERRY="$HOME/kehitys/amiberry/build/amiberry"
+CONF="${AMIBERRY_CONF:-$HOME/Amiberry/Configurations/a3000ux060-amixquake.uae}"
+AMIBERRY="${AMIBERRY_BIN:-$HOME/kehitys/amiberry/build/amiberry}"
 LOG="${2:-/tmp/quake-emu.log}"
 MODE="${1:-reset}"
 
@@ -77,6 +84,6 @@ echo "[*] amiberry started (config $(basename "$CONF"))"
 echo ""
 echo "    The login prompt goes to the Amiga console, never to the serial log."
 echo "    Log in and prime slirp from the console:"
-echo "      python3 ~/kehitys/amix-playground/kernelsupport/test-tools/sendkeys.py 'root' RET"
-echo "      python3 ~/kehitys/amix-playground/kernelsupport/test-tools/sendkeys.py 'ping 10.0.2.2' RET"
+echo "      python3 \$KERNELSUPPORT/test-tools/sendkeys.py 'root' RET"
+echo "      python3 \$KERNELSUPPORT/test-tools/sendkeys.py 'ping 10.0.2.2' RET"
 echo "    then:  AMIX_PORT=2325 python3 tools/amixsh.py 'uname -a'"

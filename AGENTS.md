@@ -37,10 +37,10 @@ anything platform-specific — each one is a working implementation of something
 | `vid_svgalib.c.orig` | id's own console framebuffer backend. The structure a video driver here should follow. |
 | `sys_linux.c.orig` | What `src/sys_amix.c` was before adaptation, for seeing what changed and why. |
 
-The live wolf3d-amix port is at `~/kehitys/amix-playground/wolf3d-amix/master`; its `CLAUDE.md`
-carries AMIX platform constraints that apply here too. The AmigaOS Quake port this tree was seeded
-from is at `~/kehitys/amix-playground/amixquake` — keep it, its `git log` explains why parts of the
-renderer look the way they do.
+Two sibling checkouts are worth having beside this one. The **wolf3d-amix** port's `CLAUDE.md`
+carries AMIX platform constraints that apply here too. The **AmigaOS Quake port** this tree was
+seeded from (`github.com/terriblefire/amiquake`) is worth keeping locally rather than browsing on
+the web — its `git log` explains why parts of the renderer look the way they do.
 
 ## Suspect the toolchain before you suspect the code
 
@@ -166,7 +166,7 @@ invalidated any timing. Keep a **quiet** kernel in `emu/kernel/`.
 
 ## The VA2000
 
-`/dev/va2000`, character device major 68, driver in `~/kehitys/va2000-amix`. Established by the
+`/dev/va2000`, character device major 68, driver in the **va2000-amix** project. Established by the
 wolf3d-amix port on real hardware and not to be re-derived:
 
 * `mmap` 4 MB of the board; the framebuffer starts at offset `0x10000`.
