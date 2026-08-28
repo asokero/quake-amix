@@ -551,8 +551,12 @@ void Draw_ConsoleBackground (int lines)
 #ifdef _WIN32
 	sprintf (ver, "(WinQuake) %4.2f", (float)VERSION);
 	dest = conback->data + 320*186 + 320 - 11 - 8*strlen(ver);
-#elif defined(X11)
-	sprintf (ver, "(X11 Quake %2.2f) %4.2f", (float)X11_VERSION, (float)VERSION);
+#elif defined(AMIX)
+// Before the __linux__ arm, not after it.  The GCC 14 build is produced by a
+// m68k-linux-gnu compiler, which defines __linux__ even though the target is
+// Amiga UNIX -- so with the arms the other way round the two builds of this
+// port disagree about what they are, and the modern one calls itself Linux.
+	sprintf (ver, "(Amiga UNIX Quake %2.2f) %4.2f", (float)AMIX_VERSION, (float)VERSION);
 	dest = conback->data + 320*186 + 320 - 11 - 8*strlen(ver);
 #elif defined(__linux__)
 	sprintf (ver, "(Linux Quake %2.2f) %4.2f", (float)LINUX_VERSION, (float)VERSION);
