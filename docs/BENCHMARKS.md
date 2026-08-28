@@ -260,13 +260,15 @@ good for proving the engine runs; it cannot produce a performance figure.
 
 ## Measurements that have not been made
 
-Listed so they are not mistaken for results:
+Listed so they are not mistaken for results. Note that GCC 14 itself **is**
+measured — three figures above — and was the fastest of everything tried; these
+are the specific gaps left around it:
 
 | | |
 |---|---|
 | gcc 14 `-O1` through the VA2000 | the only display figure for that compiler is the `-O2` build, which crashes on map load |
 | `ARCH=68020` on actual 68030 silicon | it is built and shipped, and has only ever run on an 060 |
-| gcc 14 built `-m68040` instead of `-m68060` | removes 370 FINTRZ traps from the renderer's hot path — see `docs/NEWER-COMPILER.md` |
+| gcc 14 built `-m68040` instead of `-m68060` | a variant nobody has run; removes 370 FINTRZ traps from the renderer's hot path — see `docs/NEWER-COMPILER.md` |
 
 ## Method, and two ways to get it wrong
 

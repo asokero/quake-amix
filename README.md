@@ -144,15 +144,48 @@ Quit with ESC → Quit → `y`; function keys are not mapped, so F10 does nothin
 If movement stutters at the start of a hold, raise `in_keyhold`; if the player
 keeps moving after you let go, lower it.
 
-To measure instead of play, use the `null` build — it renders into memory and
-displays nothing, so the number is the CPU alone:
+`docs/HARDWARE.md` is the full runbook, including what to do when the screen
+stays black.
+
+## Benchmarking a machine, with no graphics card
+
+The `null` build needs **no VA2000 and no display at all**. It renders each frame
+into ordinary memory and throws it away, so what it times is the CPU, the FPU and
+the memory system — which makes it a way to measure an AMIX machine, or a kernel
+change, rather than a way to play. It needs no root and no terminal, so it runs
+happily over telnet or rlogin.
 
 ```sh
+mkdir -p /quake/id1
+cp quake-null-68040 /quake/
+cp pak0.pak /quake/id1/            # shareware pak is enough
+cd /quake
 ./quake-null-68040 +timedemo demo1
 ```
 
-`docs/HARDWARE.md` is the full runbook, including what to do when the screen
-stays black.
+The line to report is the last one:
+
+```
+969 frames 129.9 seconds 7.5 fps
+```
+
+Three things will otherwise give you a wrong number, all of them learned by
+producing wrong numbers:
+
+- **`timedemo` does not exit.** Quake prints the result and then spins at full
+  speed in its console forever. Kill it by pid when the figure appears — AMIX has
+  no `pkill`.
+- **Check the machine is idle first** (`ps -ef | grep quake`, `uptime`). A
+  previous run still spinning is what made this project's first "real hardware"
+  result 1.8 fps.
+- **Report the CPU and the kernel build with the number.** Nothing is comparable
+  without them; `docs/BENCHMARKS.md` tags every figure that way.
+
+Start it detached if the session might close:
+
+```sh
+nohup ./quake-null-68040 +timedemo demo1 > bench.log 2>&1 </dev/null &
+```
 
 ## Build
 

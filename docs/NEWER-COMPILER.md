@@ -207,13 +207,19 @@ sites are in `D_DrawSpans8`, `D_DrawParticle`, `Turbulent8`,
 `D_SpriteDrawSpans`, `D_PolysetCalcGradients` and `R_EmitEdge` — the renderer's
 hot path, on the 92% of the frame that rasterisation now owns.
 
-**None of this is measured.** The `-m68060` build is the one that ran at 8.7 fps,
-so whatever FINTRZ costs, it is already paying it and still winning. The
-question is only whether there is more:
+**To be clear about what is and is not measured here.** Every GCC 14 figure in
+`docs/BENCHMARKS.md` — 9.2 fps at `-O2`, 8.7 at `-O1`, 8.2 through the VA2000 —
+comes from a `-m68060` build, and those runs happened. That build is already
+paying for all 379 FINTRZ traps and still beat GCC 2.7.2.3 comfortably.
+
+What has never been run is the `-m68040` variant below, built the day this was
+written. The open question is not whether GCC 14 is faster; it is whether it
+would be faster still:
 
 ```sh
 ARCH=68040 OUT=build/quake-gcc14-m68040 sh tools/build-gcc14.sh
 ```
 
-That build exists and has never been run. It also has never been tested for
-correctness — if it is measured, verify the frame checksum too.
+That build has never been run and has never been checked for correctness. If it
+is measured, verify the frame checksum against `f255bf50` at frame 800 as well —
+a faster build that renders differently has not answered the question.
