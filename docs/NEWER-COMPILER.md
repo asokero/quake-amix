@@ -167,3 +167,53 @@ before being blamed on the port.
 * **Diagnostics.** It found two genuine undefined-behaviour sites in id's own source that the 1995
   compiler cannot see.
 * `-m68060` exists, which gcc 2.7.2.3 does not support at all.
+
+
+## An unmeasured lead: gcc 14 picks FINTRZ, and -m68060 is why
+
+Found by running this project's own advice — `docs/OTHER-PORTS.md` says to check
+a new binary for instructions the CPU emulates before doing anything else — over
+the release binaries.
+
+| Build | `fintrz` | total 68060-emulated |
+|---|--:|--:|
+| gcc 2.7.2.3, `-m68040` | 8 | 10 |
+| **gcc 14, `-m68060`** | **379** | **385** |
+| gcc 14, `-m68040` | 9 | 15 |
+
+`FINTRZ` is float-to-int truncation, which C needs for every `(int)` cast of a
+float, and it is on the list of FP instructions **neither the 68040 nor the
+68060 implements in hardware** — each one traps to the FPSP.
+
+The two compilers disagree about how to do the cast:
+
+```
+gcc 2.7.2.3 -m68040          gcc 14 -m68060
+  fmovm.l %fpcr,%d1            fintrz.s 4(%sp),%fp0
+  fmovm.l %d2,%fpcr            fmove.l %fp0,%d0
+  fmove.l %fp0,%d0
+  fmovm.l %d1,%fpcr
+```
+
+gcc 2.7 saves the FP control register, switches to round-toward-zero, converts,
+and restores. Four instructions, all implemented in hardware. gcc 14 emits two
+instructions, one of which traps.
+
+**And gcc 14 knows the trick** — it emits the FPCR dance at `-m68040` and
+`FINTRZ` at `-m68060`, which is backwards if the 68060 emulates FINTRZ the way
+the 68040 does. Whether that is a gap in gcc's 68060 tuning or a deliberate
+judgement about the 060's trap cost, this codebase is a bad case for it: the 379
+sites are in `D_DrawSpans8`, `D_DrawParticle`, `Turbulent8`,
+`D_SpriteDrawSpans`, `D_PolysetCalcGradients` and `R_EmitEdge` — the renderer's
+hot path, on the 92% of the frame that rasterisation now owns.
+
+**None of this is measured.** The `-m68060` build is the one that ran at 8.7 fps,
+so whatever FINTRZ costs, it is already paying it and still winning. The
+question is only whether there is more:
+
+```sh
+ARCH=68040 OUT=build/quake-gcc14-m68040 sh tools/build-gcc14.sh
+```
+
+That build exists and has never been run. It also has never been tested for
+correctness — if it is measured, verify the frame checksum too.

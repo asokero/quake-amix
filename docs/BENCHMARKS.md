@@ -258,6 +258,16 @@ Same binary and data each time. **The emulator's throughput follows the host's
 load, and the spread is wider than any change being measured.** Amiberry is
 good for proving the engine runs; it cannot produce a performance figure.
 
+## Measurements that have not been made
+
+Listed so they are not mistaken for results:
+
+| | |
+|---|---|
+| gcc 14 `-O1` through the VA2000 | the only display figure for that compiler is the `-O2` build, which crashes on map load |
+| `ARCH=68020` on actual 68030 silicon | it is built and shipped, and has only ever run on an 060 |
+| gcc 14 built `-m68040` instead of `-m68060` | removes 370 FINTRZ traps from the renderer's hot path — see `docs/NEWER-COMPILER.md` |
+
 ## Method, and two ways to get it wrong
 
 Both of these produced numbers that had to be thrown away.

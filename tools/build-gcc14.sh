@@ -25,6 +25,13 @@ CRT="$SYSROOT/usr/ccs/lib"
 # The static libc lives only in a real AMIX tree; the cross sysroot ships the
 # shared one.  Override with AMIX_LIBC_A if yours is elsewhere.
 LIBCA="${AMIX_LIBC_A:-$HOME/kehitys/amix-playground/vanillarw/usr/ccs/lib/libc.a}"
+# -m68060 is the obvious choice and may not be the fast one.  gcc 14 emits
+# FINTRZ for every float-to-int at -m68060, and the FPCR round-toward-zero
+# dance at -m68040 -- and FINTRZ is on the list of instructions the 68040 and
+# 68060 do not implement in hardware.  This build has 375 of them, in
+# D_DrawSpans8, D_DrawParticle, Turbulent8 and friends.  Whether that costs
+# anything is a measurement nobody has made; ARCH=68040 builds the comparison.
+ARCH="${ARCH:-68060}"
 VIDEO="${VIDEO:-null}"
 case "$VIDEO" in
 	null)   VIDEO_SRC=vid_null   ; SUFFIX= ;;
@@ -77,7 +84,7 @@ GCCINC="$($CC -print-file-name=include)"
 # 14 bytes instead of 16, so stdout, which is &__iob[1], points into the middle
 # of the first entry and every stdio call writes to a zeroed struct.  The
 # symptom is a program that runs correctly and prints absolutely nothing.
-CFLAGS="$OPT -m68060 -malign-int -std=gnu89 -fcommon -ffreestanding -fno-strict-aliasing -fno-PIC \
+CFLAGS="$OPT -m$ARCH -malign-int -std=gnu89 -fcommon -ffreestanding -fno-strict-aliasing -fno-PIC \
         -fno-aggressive-loop-optimizations -nostdinc \
         -isystem $GCCINC -isystem $SYSROOT/usr/include \
         -DAMIX $EXTRA_DEFINES -Isrc"
