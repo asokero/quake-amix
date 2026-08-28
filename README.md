@@ -194,6 +194,12 @@ complaint:
 The fixes live in `gcc-cross-amix`'s `amix-gcc-wrapper.sh`; the analysis, with
 the worked example that exposed each one, is in that document.
 
+**Use a current `gcc-cross-amix`.** These repairs were merged upstream in 2026;
+a checkout predating them builds a compiler that produces a Quake binary which
+links, starts, and is wrong — inverted float comparisons and `switch` statements
+that branch into the middle of an instruction. `docs/TOOLCHAIN.md` has the greps
+that tell you which one you have.
+
 ## Binary releases
 
 Prebuilt binaries are attached to the GitHub releases, six of them, in one tar:
