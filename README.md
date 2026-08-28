@@ -19,8 +19,17 @@ rejected ones too.
 
 It builds on work by other people: id Software released the engine under the GPL,
 NovaCoder wrote the 68k assembly that the AmigaOS port preserved, and the AMIX
-side stands on the `va2000-amix` driver, the `wolf3d-amix` port's hardware
-findings, and the 68040/68060 kernel work.
+side stands on the projects below.
+
+| | |
+|---|---|
+| [`va2000-amix`](https://github.com/asokero/va2000-amix) | the VA2000 kernel driver this renders through |
+| [`xrtg-amix`](https://github.com/asokero/xrtg-amix) | X11R5 RTG server for the same board — not used here, Quake needs no X11 |
+| [`gcc-cross-amix`](https://github.com/isoriano1968/gcc-cross-amix) | the m68k-cbm-sysv4 cross toolchain, and where the four assembler fixes live |
+| [`terriblefire/amiquake`](https://github.com/terriblefire/amiquake) | the AmigaOS port this tree was seeded from |
+
+`wolf3d-amix`, whose VA2000 and termios layers were established on real hardware,
+is the other direct ancestor; copies of both files are in `docs/reference/`.
 
 ## Disclaimer
 
@@ -184,6 +193,23 @@ complaint:
 
 The fixes live in `gcc-cross-amix`'s `amix-gcc-wrapper.sh`; the analysis, with
 the worked example that exposed each one, is in that document.
+
+## Binary releases
+
+Prebuilt binaries are attached to the GitHub releases, six of them, in one tar:
+both video backends × `68040`/`68020`, plus the two faster GCC 14 builds. AMIX
+has no `unzip`, hence tar.
+
+```sh
+sh tools/make-release.sh v0.1      # -> build/quake-amix-v0.1.tar
+```
+
+The script builds every binary from clean and **verifies each one before writing
+the archive**: a file named `-68040` must contain no `FSGLMUL`, a file named
+`-68020` must contain some (otherwise the `ARCH` flag never reached the
+compiler), and the GCC 14 builds must be static with no `PT_GNU_STACK`. Shipping
+a binary labelled `-68040` that holds 68020 code is a mistake this project has
+already made once, and it cost a factor of 3.6.
 
 ## Repository layout
 

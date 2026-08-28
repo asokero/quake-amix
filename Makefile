@@ -66,7 +66,14 @@ CFLAGS_NO  = $(ARCH_FLAGS) $(OPT_NONE) $(DEFINES) $(INCLUDES)
 LIBS       = -lm -lc -lamixcompat
 
 SRCDIR     = src
-OBJDIR     = obj
+# Per-ARCH object directory, and not for tidiness.  Building the release matrix
+# means building 68020 and 68040 back to back; with one shared obj/ the second
+# build reuses the first one's objects, because the .o files are newer than the
+# .c files and make has no idea the architecture changed.  That ships a binary
+# named -68040 containing 68020 code, which is exactly the 3.6x mistake this
+# project already made once.  ASM=yes also changes d_scan.o via -DUSE_ASM_TURB,
+# so switch that with a clean build.
+OBJDIR     = obj-$(ARCH)
 TARGET     = build/quake-$(VIDEO)-$(ARCH)
 
 # ---------------------------------------------------------------- source lists
