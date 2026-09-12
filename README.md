@@ -119,14 +119,35 @@ Copy the binary and the game data onto the machine, however you normally move
 files — NFS, a NAS mount, or `tftp`:
 
 ```sh
-mkdir -p /quake/id1
-cp quake-va2000-68040 /quake/quake
-cp pak0.pak           /quake/id1/
-chmod +x /quake/quake
+mkdir -p /apps/quake/id1
+cp quake-va2000-68040 /apps/quake/quake
+cp pak0.pak           /apps/quake/id1/
+chmod +x /apps/quake/quake
 ```
 
-**Rebind before the first run.** Attack is bound to Ctrl by default and a tty
-cannot see Ctrl, so create `/quake/id1/autoexec.cfg`:
+Then, as root:
+
+```sh
+cd /apps/quake && ./quake
+```
+
+Quit with ESC → Quit → `y`.
+
+### Keyboard
+
+On the **physical console** the default controls work as they do anywhere else:
+Ctrl fires, Shift runs, Alt strafes, and any number of keys can be held at once.
+Nothing needs rebinding. Quake reads Amiga raw key codes straight from
+`/dev/screen`, which reports releases as well as presses, and startup says so:
+
+```
+IN_Init: /dev/screen rawkey, group 1
+```
+
+**Over telnet** there is only a tty, and a tty reports no modifier keys and no
+releases whatsoever. Startup says `tty fallback` instead, a held key is inferred
+from terminal auto-repeat, and attack has to be rebound before the first run —
+put this in `/apps/quake/id1/autoexec.cfg`:
 
 ```
 bind SPACE +attack
@@ -134,15 +155,19 @@ bind j +jump
 in_keyhold 400
 ```
 
-Then, as root:
+`in_keyhold` is how long a key stays down after its last repeat, in
+milliseconds. If movement stutters at the start of a hold, raise it; if the
+player keeps moving after you let go, lower it. It does nothing on the console,
+where releases are real. `-ttyinput` forces the tty path on the console too, for
+comparison.
+
+If a key does nothing, `rawkeyprobe` says whether the kernel reported it at all
+— and whether the mouse is reported, which is still an open question:
 
 ```sh
-cd /quake && ./quake
+./rawkeyprobe-68040                 # safe: does not take the screen
+./rawkeyprobe-68040 -capture 1 15   # physical console only
 ```
-
-Quit with ESC → Quit → `y`; function keys are not mapped, so F10 does nothing.
-If movement stutters at the start of a hold, raise `in_keyhold`; if the player
-keeps moving after you let go, lower it.
 
 `docs/HARDWARE.md` is the full runbook, including what to do when the screen
 stays black.
@@ -156,10 +181,10 @@ change, rather than a way to play. It needs no root and no terminal, so it runs
 happily over telnet or rlogin.
 
 ```sh
-mkdir -p /quake/id1
-cp quake-null-68040 /quake/
-cp pak0.pak /quake/id1/            # shareware pak is enough
-cd /quake
+mkdir -p /apps/quake/id1
+cp quake-null-68040 /apps/quake/
+cp pak0.pak /apps/quake/id1/       # shareware pak is enough
+cd /apps/quake
 ./quake-null-68040 +timedemo demo1
 ```
 

@@ -16,9 +16,10 @@ tooling, and pass the password through `AMIX_PASS` at the point of use.
 
 | From | To on AMIX | Notes |
 |---|---|---|
-| `build/quake-va2000-68040` | `/quake/quake` | the game, needs the VA2000 |
-| `build/quake-null-68040` | `/quake/quake-bench` | renders to memory, displays nothing |
-| `id1/pak0.pak` | `/quake/id1/pak0.pak` | 18.7 MB, shareware pak is enough |
+| `build/quake-va2000-68040` | `/apps/quake/quake` | the game, needs the VA2000 |
+| `build/quake-null-68040` | `/apps/quake/quake-bench` | renders to memory, displays nothing |
+| `build/rawkeyprobe-68040` | `/apps/quake/rawkeyprobe` | diagnostic; see "Keyboard" below |
+| `id1/pak0.pak` | `/apps/quake/id1/pak0.pak` | 18.7 MB, shareware pak is enough |
 
 Any shared filesystem the machine can already see is the easy path — an NFS
 export or a mounted SMB share. None of the emulator's tftp gymnastics apply on
@@ -27,11 +28,12 @@ goes across in one piece.
 
 ```sh
 # On the AMIX machine, with the build staged somewhere it can read:
-mkdir -p /quake/id1
-cp $STAGING/quake-va2000-68040 /quake/quake
-cp $STAGING/quake-null-68040   /quake/quake-bench
-cp $STAGING/pak0.pak           /quake/id1/
-chmod +x /quake/quake /quake/quake-bench
+mkdir -p /apps/quake/id1
+cp $STAGING/quake-va2000-68040 /apps/quake/quake
+cp $STAGING/quake-null-68040   /apps/quake/quake-bench
+cp $STAGING/rawkeyprobe-68040  /apps/quake/rawkeyprobe
+cp $STAGING/pak0.pak           /apps/quake/id1/
+chmod +x /apps/quake/quake /apps/quake/quake-bench /apps/quake/rawkeyprobe
 ```
 
 **Put game data under `/`, not `/tmp`** — AMIX clears `/tmp` on every boot.
@@ -74,14 +76,43 @@ Zorro II. The difference between the two numbers is the display cost:
 ## Playing
 
 ```sh
-cd /quake
+cd /apps/quake
 ./quake
 ```
 
-Keyboard only — the mouse is not implemented. It comes through the console tty,
-which reports presses but never releases, so a key is held for as long as the
-terminal keeps auto-repeating it and released `in_keyhold` milliseconds after
-the repeats stop.
+## Keyboard
+
+Keyboard only — the mouse is not implemented on either path. Which path you get
+is printed at startup and decides how the game feels, so read that line:
+
+```
+IN_Init: /dev/screen rawkey, group 1            <- the console
+IN_Init: tty fallback, in_keyhold 250 ms; ...   <- telnet
+```
+
+### The raw path, on the physical console
+
+`/dev/screen` in `SIM_RAWKEY` mode reports Amiga raw key codes for presses
+**and** releases. That gives Quake a real Ctrl, Shift and Alt — its three
+default action keys — a real key-up, and any number of keys held at once.
+Nothing needs rebinding and `in_keyhold` does nothing. This is the path to play
+on.
+
+Selecting it needs a screen group, which the console has and telnet does not.
+`SCREEN_GROUP` overrides the group if the automatic lookup gets it wrong;
+`-ttyinput` forces the tty path for comparison.
+
+Quake's key table lives in `raw_keymap[]` in `src/in_amix.c`. Two entries there
+are decisions rather than transcription: the numeric keypad is mapped to the
+same digits as the number row, and the right Amiga key is a second Ctrl —
+because the only real Ctrl on an Amiga keyboard is in the far bottom-left
+corner, which is not where your left hand is while walking.
+
+### The tty path, over telnet
+
+A tty reports presses and never releases, so a key counts as held for as long
+as the terminal keeps auto-repeating it and comes up `in_keyhold` milliseconds
+after the repeats stop.
 
 **Expect to tune that.** It is a cvar precisely because it cannot be guessed
 from here:
@@ -90,22 +121,42 @@ from here:
 - the player keeps moving after you let go → lower it (`in_keyhold 150`)
 
 Set it from the Quake console (`~`), or put `in_keyhold 400` in
-`/quake/id1/autoexec.cfg`.
+`/apps/quake/id1/autoexec.cfg`.
 
-**A tty cannot see modifier keys.** Ctrl, Shift and Alt never arrive as keys of
-their own — Ctrl+A is just byte 0x01 — so every default bind that uses one is
-dead. Quake binds attack to Ctrl, which means **you cannot shoot** until you
-rebind. Put this in `/quake/id1/autoexec.cfg` before the first run:
+**A tty also cannot see modifier keys.** Ctrl, Shift and Alt never arrive as
+keys of their own — Ctrl+A is just byte 0x01 — so every default bind that uses
+one is dead. Quake binds attack to Ctrl, which means **you cannot shoot** until
+you rebind. Put this in `/apps/quake/id1/autoexec.cfg` before the first run:
 
 ```
 bind SPACE +attack
-bind ALT +jump
+bind j +jump
 in_keyhold 400
 ```
 
-(`ALT` there is the literal string Quake parses for its own K_ALT; it will not
-fire either, so pick a letter key instead if jumping matters —
-`bind j +jump`.)
+(Do not write `bind ALT +jump`: `ALT` is the string Quake parses for its own
+K_ALT, and that key cannot reach a tty either, so the bind would be just as
+dead as the one it replaced.)
+
+### When a key does nothing
+
+`rawkeyprobe` says whether the kernel reported the key at all, which is the
+half of the question Quake cannot answer for you:
+
+```sh
+./rawkeyprobe                 # safe: opens the device, does not take the screen
+./rawkeyprobe -capture 1 15   # takes the keyboard for 15 s; Escape ends it early
+```
+
+Capture activates a screen of its own, so it belongs on the physical console
+and nowhere else; closing the descriptor puts the previous screen back. Hold a
+chord — arrow + Ctrl + Shift — and check that every key produces its own `down`
+and its own `up`. Bit 7 of the code marks a release.
+
+It also counts `IETYPE_MOUSE` events and says so at the end. That is an open
+question worth answering while you are there: `<sys/screen.h>` defines mouse
+events but offers no `SIM_` mode to ask for them, so whether they arrive on this
+descriptor anyway is what decides if the console build can have mouselook.
 
 **To quit**, use ESC → the menu → Quit → `y`. Only mapped keys are needed for
 that path: ESC, the arrows, Enter and `y`. Function keys are not mapped, so
@@ -145,10 +196,19 @@ shakedown. Before reading the C, check what came out of the assembler —
 - The numbers are in `docs/BENCHMARKS.md`, each one tagged with the CPU, the
   kernel build and the bus it came from. Report those three with any new figure
   or it cannot be compared against anything.
-- Keyboard response is usable but not good. `in_keyhold` has not been tuned to a
-  value anyone is happy with — if you find one, put it in the benchmarks doc.
+- Keyboard response over the tty is usable but not good. `in_keyhold` has not
+  been tuned to a value anyone is happy with. The raw path exists to make that
+  question irrelevant on the console — see below, it is the next thing to test.
 
 Still open, and worth recording if you get to it:
+
+- **the `/dev/screen` raw keyboard, which has never been run on the machine.**
+  It compiles into all three builds and follows the doom-amix port's working
+  implementation closely, but nothing here has seen it drive Quake. Check the
+  startup line first, then that Ctrl fires and that walking while firing works;
+  `rawkeyprobe` separates "the table is wrong" from "the kernel never said".
+- whether `SIM_RAWKEY` also delivers mouse events, which `rawkeyprobe` reports
+  and which decides whether the console build can have mouselook
 
 - whether the aspect ratio is exactly right; `vid.aspect` is id's 320×200
   expression and the board scales 2× into a 640×480 frame

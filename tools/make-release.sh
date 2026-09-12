@@ -36,6 +36,13 @@ for A in 68040 68020; do
 	done
 done
 
+# ---- the raw keyboard probe ------------------------------------------------
+# Small, and it earns its place in the archive: when a key does nothing, this
+# is what says whether the kernel reported it at all.
+echo "    make rawkeyprobe"
+make ARCH=68040 rawkeyprobe >/dev/null
+cp build/rawkeyprobe-68040 "$STAGE/"
+
 # ---- experimental builds, gcc 14 -------------------------------------------
 for V in null va2000; do
 	echo "    build-gcc14.sh VIDEO=$V"
@@ -68,8 +75,13 @@ test "$fail" -eq 0 || { echo "[!] verification failed, no archive written"; exit
 # ---- stage the rest --------------------------------------------------------
 cp LICENSE "$STAGE/"
 cat > "$STAGE/autoexec.cfg" <<'CFG'
-// Quake cannot see Ctrl, Shift or Alt through a tty, so the default +attack
-// bind is dead.  Put this file in /quake/id1/ before the first run.
+// FOR TELNET ONLY.  On the physical console Quake reads /dev/screen directly
+// and Ctrl, Shift and Alt all work, so none of this is needed there -- and
+// in_keyhold does nothing at all, because real key releases are reported.
+//
+// Over telnet there is only a tty, which reports no modifier keys and no
+// releases whatsoever, so the default +attack bind is dead.  Put this in
+// /apps/quake/id1/ before the first run.
 bind SPACE +attack
 bind j +jump
 in_keyhold 400
@@ -93,6 +105,9 @@ WHICH ONE
   quake-null-gcc14     with GCC 14 rather than the period-correct GCC 2.7.2.3,
                        statically linked.  Plays correctly; less proven.
 
+  rawkeyprobe-68040    diagnostic, not the game.  Prints what the keyboard
+                       reports.  See KEYBOARD below.
+
 REQUIREMENTS
 ------------
   * AMIX 2.1p2a with the 68040/68060 kernel port
@@ -103,22 +118,44 @@ REQUIREMENTS
 
 INSTALL
 -------
-  mkdir -p /quake/id1
-  cp quake-va2000-68040 /quake/quake
-  cp autoexec.cfg       /quake/id1/
-  cp pak0.pak           /quake/id1/
-  chmod +x /quake/quake
-  cd /quake && ./quake
+  mkdir -p /apps/quake/id1
+  cp quake-va2000-68040 /apps/quake/quake
+  cp pak0.pak           /apps/quake/id1/
+  chmod +x /apps/quake/quake
+  cd /apps/quake && ./quake
 
-Copy autoexec.cfg before the first run.  A tty cannot see Ctrl, so without it
-you cannot shoot.  Quit with ESC -> Quit -> y; the function keys are not mapped.
+Quit with ESC -> Quit -> y.
 
 To benchmark instead:  ./quake-null-68040 +timedemo demo1
 
+KEYBOARD
+--------
+On the PHYSICAL CONSOLE Quake reads Amiga raw key codes from /dev/screen, so
+the default controls work as they do anywhere else: Ctrl fires, Shift runs,
+Alt strafes, and any number of keys can be held at once.  Nothing to
+configure.  Startup prints
+
+  IN_Init: /dev/screen rawkey, group 1
+
+OVER TELNET there is only a tty, which reports no modifier keys and no key
+releases at all.  Startup says "tty fallback" instead, a held key is inferred
+from terminal auto-repeat, and you want autoexec.cfg (included) in
+/apps/quake/id1/ before the first run -- without it you cannot shoot.
+in_keyhold tunes how long a key stays down after its last repeat.
+
+  -ttyinput   forces the tty path on the console too, for comparison.
+
+If a key does nothing, run rawkeyprobe on the console to see whether the
+kernel reported it:
+
+  ./rawkeyprobe-68040                 safe; does not take the screen
+  ./rawkeyprobe-68040 -capture 1 15   takes the keyboard for 15 seconds
+
 KNOWN LIMITS
 ------------
-  no sound, no mouse, networking is loopback only.  Key release is emulated
-  from auto-repeat, so movement needs in_keyhold tuned to taste.
+  no sound, no mouse, networking is loopback only.  Over telnet, key release
+  is emulated from auto-repeat, so movement needs in_keyhold tuned to taste;
+  on the console releases are real and in_keyhold does nothing.
 
 LICENCE
 -------

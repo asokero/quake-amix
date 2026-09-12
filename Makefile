@@ -136,6 +136,19 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.s
 #	@mkdir -p $(OBJDIR)
 #	$(CC) $(CFLAGS_NO) -c $< -o $@
 
+# tools/rawkeyprobe.c -- what /dev/screen actually reports, without Quake in
+# the way.  src/in_amix.c maps Amiga raw codes to Quake keys through a table,
+# and this is how that table gets checked against a real keyboard: a key that
+# does nothing in the game is either mapped wrong or never reported, and only
+# this tells you which.  It also answers whether SIM_RAWKEY carries mouse
+# events, which decides whether the console build can have mouselook.
+rawkeyprobe: build/rawkeyprobe-$(ARCH)
+
+build/rawkeyprobe-$(ARCH): tools/rawkeyprobe.c
+	@mkdir -p build
+	$(CC) $(ARCH_FLAGS) $(OPT_FLAGS) $(DEFINES) -o $@ $< -lc -lamixcompat
+	@echo "Build complete: $@"
+
 clean:
 	rm -rf $(OBJDIR) build
 
@@ -149,4 +162,4 @@ config:
 	@echo "ARCH     : $(ARCH)"
 	@echo "ASM      : $(ASM) $(ASM_SRCS)"
 
-.PHONY: all clean config
+.PHONY: all clean config rawkeyprobe
