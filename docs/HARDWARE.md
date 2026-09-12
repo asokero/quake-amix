@@ -162,6 +162,60 @@ descriptor anyway is what decides if the console build can have mouselook.
 that path: ESC, the arrows, Enter and `y`. Function keys are not mapped, so
 Quake's usual F10 will not work.
 
+## Running from an X11 desktop
+
+Started from an X session on the same VA2000, the ordinary path is wrong three
+times over. It replaces the X server's mode with its own, it draws over the X
+server's pixels — which live at the bottom of video memory, where Quake also
+draws — and on exit it hands the display to the Amiga side rather than back to
+X. Nothing tells xrtg that any of this happened, so nothing redraws, and the
+desktop does not come back.
+
+`-shared` is the path for that case:
+
+```sh
+cd /apps/quake
+./quake -shared                        # 800x600, xrtg's default
+./quake -shared -sharedmode 1024x768   # if X is running something else
+```
+
+What it does instead:
+
+- **No mode register is written at all**, so X's mode stays up and Quake runs
+  inside whatever resolution X is already displaying.
+- **The drawing area is 16 MB up the framebuffer**, past anything a screen mode
+  reaches, so the X server's pixels are never touched.
+- **The display is pointed at that area** while Quake runs, and **put back
+  exactly where it was found** on the way out. Because X's pixels were never
+  overwritten, the desktop reappears intact and needs no redraw.
+
+That asymmetry — mode cannot be saved, pan can — is the whole reason the design
+looks like this. It was measured on this board by the saku26 port: write a mode
+register and read it back and you get `0x005a` whatever you put there, while the
+pan registers return what was written. So restoring the mode is impossible and
+not touching it is the only option.
+
+Three things worth knowing before the first run:
+
+- **The geometry has to be told, because the CRTC cannot be read back.** Get it
+  wrong and the picture is off-centre or skewed. It cannot damage anything —
+  no mode register is written either way.
+- **It is slower than the console path**, and by design: xrtg runs RGB565, so
+  every pixel goes through a lookup table and two bytes cross the bus where one
+  did. `-shared` is for convenience, not for measurement. Benchmark on the
+  console.
+- **If the warning about Amiga passthrough appears, `-shared` was not what you
+  wanted.** Quake prints the pan value it found, and `0xf8` in the high half
+  means the Amiga passthrough buffer is on display — so no X server is running
+  and there is nobody to be a guest of. Run without `-shared` and you get a mode
+  set and a clean return to the console.
+
+None of this changes the console path. It is selected by the flag and by
+nothing else: with `-shared` absent, the same mode is set, the same bytes are
+written, and the same passthrough is restored as before. The generated code for
+the copy loop is unchanged instruction for instruction, and `VID_Update` gains
+exactly one test, outside the loop.
+
 ## If it goes wrong
 
 **The screen stays black or garbled.** The mode-set register sequence is copied

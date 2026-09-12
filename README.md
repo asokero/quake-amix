@@ -172,6 +172,24 @@ If a key does nothing, `rawkeyprobe` says whether the kernel reported it at all
 `docs/HARDWARE.md` is the full runbook, including what to do when the screen
 stays black.
 
+### Running it from an X11 desktop
+
+Started from an X session on the same VA2000, `-shared` makes Quake a guest on
+the board instead of an owner of it: it writes no mode register, draws 16 MB up
+the framebuffer where the X server's pixels are not, and puts the display back
+exactly where it found it on the way out — so the desktop returns intact.
+
+```sh
+./quake -shared                        # 800x600, xrtg's default
+./quake -shared -sharedmode 1024x768   # if X is running something else
+```
+
+The resolution has to be given because the board's CRTC cannot be read back.
+This path is slower than the console one — xrtg runs RGB565, so every pixel
+goes through a lookup table — so benchmark on the console, not here.
+`docs/HARDWARE.md` has the details, including why the mode cannot simply be
+saved and restored.
+
 ## Benchmarking a machine, with no graphics card
 
 The `null` build needs **no VA2000 and no display at all**. It renders each frame
